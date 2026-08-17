@@ -145,7 +145,8 @@ pub struct PipelineNode {
 - Composition Generate request v6 and result v3 make the Package request and Build/Package results
   optional as matched groups. A package request is required exactly when the resolved graph contains
   `feature.project-package`; caller presence alone cannot add or skip delivery.
-- Blueprint v6 persists the complete resolved pipeline plus the compiled trusted Prepare executor.
+- Blueprint v7 persists the complete resolved pipeline, compiled trusted Prepare executor and
+  Graph-pinned `ModelRequestLimits`.
   Prepare output schemas equal the exact persisted checkpoint schemas; data-only may directly
   produce the common finalize checkpoint without Plan/Single. Existing ExecutionGraph v4 continues
   to own generative checkpoints, repair campaigns and the one graph-level validation/commit state
@@ -1285,9 +1286,10 @@ item.000.plan -> item.000.single -> item.001.plan -> item.001.single -> ...
 Runtime `ExecutionCommitIntent` accepts exactly one Draft intent or one generic publication intent.
 Mixed forms, unsafe target IDs or payload-hash mismatch are invalid graph records. ExecutionGraph
 v4 uses only `.ats/execution-graphs-v4`; v1/v2/v3 JSON is not read, migrated, copied or rewritten.
-Old directories remain untouched evidence. Composition Generate request v6 and Blueprint v6 are the
-only graph-creation contracts after this cutover; no compatibility reader accepts Blueprint v5 or
-earlier schemas.
+Old directories remain untouched evidence. Composition Generate request v6 and Blueprint v7 are the
+only graph-creation contracts after this cutover; no compatibility reader accepts Blueprint v6 or
+earlier schemas. Composition Plan Blueprint v2 likewise pins `ModelRequestLimits` and does not read
+its v1 predecessor.
 
 #### 4. Validation & Error Matrix
 

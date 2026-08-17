@@ -449,6 +449,7 @@ pub struct CompositionPlanContext<'a> {
     pub project_context: Option<&'a str>,
     pub custom_instructions: Option<&'a str>,
     pub model: Option<String>,
+    pub model_request_limits: ats_runtime::ModelRequestLimits,
 }
 
 pub struct CompositionRetryNodeContext<'a> {
@@ -459,6 +460,7 @@ pub struct CompositionRetryNodeContext<'a> {
     pub project_context: Option<&'a str>,
     pub custom_instructions: Option<&'a str>,
     pub model: Option<String>,
+    pub model_request_limits: ats_runtime::ModelRequestLimits,
 }
 
 #[derive(Debug, Clone)]
@@ -551,9 +553,12 @@ impl CompositionPlanService {
             ),
             ("request.concept".into(), request.concept.clone()),
         ]);
-        let model_request =
-            self.recipe
-                .render_with_output_contract(&slots, context.model, output_contract)?;
+        let model_request = self.recipe.render_with_output_contract(
+            &slots,
+            context.model,
+            output_contract,
+            &context.model_request_limits,
+        )?;
         let snapshot = ModelRequestSnapshot::new(
             CompositionPlanFeature::id(),
             self.recipe.recipe_ref(),
@@ -817,7 +822,9 @@ impl CompositionRetryNodeService {
             ),
             ("request.instructions".into(), request.instructions.clone()),
         ]);
-        let model_request = self.recipe.render(&slots, context.model)?;
+        let model_request =
+            self.recipe
+                .render(&slots, context.model, &context.model_request_limits)?;
         let snapshot = ModelRequestSnapshot::new(
             CompositionRetryNodeFeature::id(),
             self.recipe.recipe_ref(),
@@ -3005,6 +3012,7 @@ mod tests {
                     project_context: Some("Fixture project"),
                     custom_instructions: None,
                     model: None,
+                    model_request_limits: ats_runtime::ModelRequestLimits::default(),
                 },
                 &CancellationToken::new(),
             )
@@ -3091,6 +3099,8 @@ mod tests {
                     project_context: None,
                     custom_instructions: None,
                     model: None,
+                    model_request_limits: ats_runtime::ModelRequestLimits::new(Some(4_096))
+                        .unwrap(),
                 },
                 first_run.clone(),
             )
@@ -3134,6 +3144,7 @@ mod tests {
                     project_context: None,
                     custom_instructions: None,
                     model: None,
+                    model_request_limits: ats_runtime::ModelRequestLimits::default(),
                 },
                 &CancellationToken::new(),
             )
@@ -3148,6 +3159,14 @@ mod tests {
             first_model.snapshots.lock().unwrap().len()
         );
         assert_eq!(first_model.snapshots.lock().unwrap().len(), 3);
+        assert!(
+            first_model
+                .snapshots
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|snapshot| snapshot.request().max_output_tokens == 4_096)
+        );
         let paused = graphs.get(&graph_id).unwrap();
         assert_eq!(paused.status(), ExecutionGraphStatus::Paused);
         assert!(drafts.0.lock().unwrap().is_none());
@@ -3166,6 +3185,8 @@ mod tests {
                     project_context: None,
                     custom_instructions: None,
                     model: None,
+                    model_request_limits: ats_runtime::ModelRequestLimits::new(Some(1_024))
+                        .unwrap(),
                 },
             )
             .unwrap();
@@ -3196,6 +3217,8 @@ mod tests {
                     project_context: None,
                     custom_instructions: None,
                     model: None,
+                    model_request_limits: ats_runtime::ModelRequestLimits::new(Some(1_024))
+                        .unwrap(),
                 },
                 &CancellationToken::new(),
             )
@@ -3207,6 +3230,12 @@ mod tests {
             graphs.get(&graph_id).unwrap()
         );
         let execution = outcome.unwrap();
+        assert_eq!(
+            second_model.snapshots.lock().unwrap()[0]
+                .request()
+                .max_output_tokens,
+            4_096
+        );
         assert_eq!(second_model.snapshots.lock().unwrap().len(), 1);
         assert_eq!(execution.request_snapshots.len(), 1);
         assert_eq!(
@@ -3237,6 +3266,7 @@ mod tests {
                     project_context: None,
                     custom_instructions: None,
                     model: None,
+                    model_request_limits: ats_runtime::ModelRequestLimits::default(),
                 },
             )
             .unwrap();
@@ -3260,6 +3290,7 @@ mod tests {
                     project_context: None,
                     custom_instructions: None,
                     model: None,
+                    model_request_limits: ats_runtime::ModelRequestLimits::default(),
                 },
                 &CancellationToken::new(),
             )
@@ -3326,6 +3357,7 @@ mod tests {
                         project_context: None,
                         custom_instructions: None,
                         model: None,
+                        model_request_limits: ats_runtime::ModelRequestLimits::default(),
                     },
                     run_id.clone(),
                 )
@@ -3355,6 +3387,7 @@ mod tests {
                         project_context: None,
                         custom_instructions: None,
                         model: None,
+                        model_request_limits: ats_runtime::ModelRequestLimits::default(),
                     },
                     &cancellation,
                 )
@@ -3501,6 +3534,7 @@ mod tests {
                     project_context: None,
                     custom_instructions: None,
                     model: None,
+                    model_request_limits: ats_runtime::ModelRequestLimits::default(),
                 },
                 &CancellationToken::new(),
             )
@@ -3533,6 +3567,7 @@ mod tests {
                     project_context: None,
                     custom_instructions: None,
                     model: None,
+                    model_request_limits: ats_runtime::ModelRequestLimits::default(),
                 },
                 &CancellationToken::new(),
             )
@@ -3583,6 +3618,7 @@ mod tests {
                     project_context: None,
                     custom_instructions: None,
                     model: None,
+                    model_request_limits: ats_runtime::ModelRequestLimits::default(),
                 },
                 &CancellationToken::new(),
             )

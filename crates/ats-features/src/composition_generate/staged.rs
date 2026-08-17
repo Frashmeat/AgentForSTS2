@@ -73,6 +73,7 @@ pub fn composition_adjustment_items(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StagedCompositionGenerateBlueprint {
     schema_version: u32,
+    model_request_limits: ats_runtime::ModelRequestLimits,
     game_pack_id: GamePackId,
     game_pack_sha256: Sha256Digest,
     truth_snapshot_id: Sha256Digest,
@@ -209,7 +210,8 @@ impl CompositionGenerateService<'_> {
             .resolve(&contribution.pipeline, &pipeline_request)?;
         let (prepare, staged_items, _, specs) = compile_generation_nodes(&pipeline, &resolved)?;
         let blueprint = StagedCompositionGenerateBlueprint {
-            schema_version: 6,
+            schema_version: 7,
+            model_request_limits: context.model_request_limits,
             game_pack_id: context.pack.id().clone(),
             game_pack_sha256: context.pack.content_sha256().clone(),
             truth_snapshot_id: context.truth.manifest().snapshot_id().clone(),
@@ -508,6 +510,7 @@ impl CompositionGenerateService<'_> {
                                 project_context: Some(context.project_context),
                                 custom_instructions: context.custom_instructions,
                                 model: context.model.clone(),
+                                model_request_limits: blueprint.model_request_limits,
                                 authoritative_definition: Some(definition),
                             },
                             cancellation,
@@ -616,7 +619,7 @@ impl CompositionGenerateService<'_> {
                                     },
                                     &child_run,
                                     &single_request,
-                                    &single_context(&context),
+                                    &single_context(&context, blueprint.model_request_limits),
                                     feedback,
                                     cancellation,
                                 )
@@ -630,7 +633,7 @@ impl CompositionGenerateService<'_> {
                                     },
                                     &child_run,
                                     &single_request,
-                                    &single_context(&context),
+                                    &single_context(&context, blueprint.model_request_limits),
                                     cancellation,
                                 )
                                 .await
@@ -794,7 +797,7 @@ impl CompositionGenerateService<'_> {
                     let restored = self.single.restore_composition_proposal(
                         dependencies.resources,
                         &single_request,
-                        &single_context(&context),
+                        &single_context(&context, blueprint.model_request_limits),
                         &checkpoint.proposal,
                     )?;
                     validate_next_proposal_merge_claims(&accepted_proposals, &restored)
@@ -1469,6 +1472,7 @@ impl CompositionGenerateService<'_> {
                     run_id,
                     request,
                     context,
+                    blueprint.model_request_limits,
                     item,
                     target.checkpoint_hash.clone(),
                     &single_request,
@@ -1558,6 +1562,7 @@ impl CompositionGenerateService<'_> {
         run_id: &RunId,
         request: &CompositionGenerateRequest,
         context: &CompositionGenerateContext<'_>,
+        model_request_limits: ats_runtime::ModelRequestLimits,
         item: &StagedCompositionGenerateItem,
         checkpoint_hash: Sha256Digest,
         single_request: &SingleGenerateRequest,
@@ -1633,7 +1638,7 @@ impl CompositionGenerateService<'_> {
                     SingleProposalDependencies { model, resources },
                     &child_run,
                     single_request,
-                    &single_context(context),
+                    &single_context(context, model_request_limits),
                     &revision_request,
                     cancellation,
                 )
@@ -1745,7 +1750,7 @@ impl StagedCompositionGenerateBlueprint {
             .composition_contributions
             .decode(&generation_slot())?;
         pipelines.validate_resolved(&contribution.pipeline, &self.pipeline)?;
-        if self.schema_version != 6
+        if self.schema_version != 7
             || self.game_pack_id != *context.pack.id()
             || self.game_pack_sha256 != *context.pack.content_sha256()
             || self.truth_snapshot_id != *context.truth.manifest().snapshot_id()
@@ -2102,7 +2107,7 @@ where
         let proposal = service.single.restore_composition_proposal(
             resources,
             &single_request,
-            &single_context(context),
+            &single_context(context, blueprint.model_request_limits),
             &single.proposal,
         )?;
         validate_next_proposal_merge_claims(&proposals, &proposal)
@@ -2149,7 +2154,7 @@ where
         let proposal = service.single.restore_composition_proposal(
             resources,
             &single_request,
-            &single_context(context),
+            &single_context(context, blueprint.model_request_limits),
             &single.proposal,
         )?;
         validate_next_proposal_merge_claims(&proposals, &proposal)
@@ -2286,7 +2291,10 @@ fn validate_publication_intent(
     Ok(())
 }
 
-fn single_context<'a>(context: &'a CompositionGenerateContext<'a>) -> SingleGenerateContext<'a> {
+fn single_context<'a>(
+    context: &'a CompositionGenerateContext<'a>,
+    model_request_limits: ats_runtime::ModelRequestLimits,
+) -> SingleGenerateContext<'a> {
     SingleGenerateContext {
         pack: context.pack,
         contributions: context.single_contributions,
@@ -2296,6 +2304,7 @@ fn single_context<'a>(context: &'a CompositionGenerateContext<'a>) -> SingleGene
         project_context: context.project_context,
         custom_instructions: context.custom_instructions,
         model: context.model.clone(),
+        model_request_limits,
     }
 }
 
@@ -2655,7 +2664,7 @@ fn succeed_parent(
 }
 
 fn blueprint_schema() -> SchemaRef {
-    schema_version(BLUEPRINT_SCHEMA_ID, 6)
+    schema_version(BLUEPRINT_SCHEMA_ID, 7)
 }
 
 fn item_adjustment_schema() -> SchemaRef {

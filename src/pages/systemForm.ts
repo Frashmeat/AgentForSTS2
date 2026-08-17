@@ -5,6 +5,7 @@ export interface FormState {
   llmModel: string;
   llmBaseUrl: string;
   llmCustomPrompt: string;
+  llmMaxOutputTokens: string;
   llmApiKey: string;
   llmApiKeyTouched: boolean;
   imageProvider: string;
@@ -26,6 +27,7 @@ export function formFromSnapshot(snapshot: SettingsSnapshot): FormState {
     llmModel: snapshot.llm.model,
     llmBaseUrl: snapshot.llm.baseUrl,
     llmCustomPrompt: snapshot.llm.customPrompt ?? "",
+    llmMaxOutputTokens: snapshot.llm.maxOutputTokens?.toString() ?? "",
     llmApiKey: "",
     llmApiKeyTouched: false,
     imageProvider: snapshot.imageGen.provider,
@@ -43,12 +45,18 @@ export function formFromSnapshot(snapshot: SettingsSnapshot): FormState {
 }
 
 export function buildPatch(form: FormState, original: SettingsSnapshot): SettingsPatch {
+  const maxOutputTokensError = validateMaxOutputTokens(form.llmMaxOutputTokens);
+  if (maxOutputTokensError) throw new Error(maxOutputTokensError);
   const patch: SettingsPatch = {};
   const llm: NonNullable<SettingsPatch["llm"]> = {};
   if (form.llmProvider !== original.llm.provider) llm.provider = form.llmProvider;
   if (form.llmModel !== original.llm.model) llm.model = form.llmModel;
   if (form.llmBaseUrl !== original.llm.baseUrl) llm.baseUrl = form.llmBaseUrl;
   if (form.llmCustomPrompt !== (original.llm.customPrompt ?? "")) llm.customPrompt = form.llmCustomPrompt;
+  const maxOutputTokens = form.llmMaxOutputTokens.trim() === ""
+    ? null
+    : Number(form.llmMaxOutputTokens.trim());
+  if (maxOutputTokens !== original.llm.maxOutputTokens) llm.maxOutputTokens = maxOutputTokens;
   if (form.llmApiKeyTouched) llm.apiKey = form.llmApiKey;
   if (Object.keys(llm).length > 0) patch.llm = llm;
 
@@ -65,4 +73,14 @@ export function buildPatch(form: FormState, original: SettingsSnapshot): Setting
   if (form.sts2DllPath !== original.knowledge.sts2DllPath) patch.knowledge = { sts2DllPath: form.sts2DllPath };
   if (form.godotExePath !== original.toolchain.godotExePath) patch.toolchain = { godotExePath: form.godotExePath };
   return patch;
+}
+
+export function validateMaxOutputTokens(value: string): string | null {
+  const normalized = value.trim();
+  if (normalized === "") return null;
+  if (!/^\d+$/.test(normalized)) return "Enter a whole number from 1 to 65,536.";
+  const parsed = Number(normalized);
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= 65_536
+    ? null
+    : "Enter a whole number from 1 to 65,536.";
 }

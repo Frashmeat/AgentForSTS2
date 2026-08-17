@@ -63,6 +63,17 @@ impl CommandFailure {
         )
     }
 
+    pub fn model_configuration(stage: &str) -> Self {
+        fixed(
+            "model.configuration",
+            "configuration",
+            stage,
+            "Configure a valid model output budget before starting model work.",
+            RecoveryAction::CheckSettings,
+            false,
+        )
+    }
+
     pub fn truth_missing(stage: &str) -> Self {
         fixed(
             "truth.missing",

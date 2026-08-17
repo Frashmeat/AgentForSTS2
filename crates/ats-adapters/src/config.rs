@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use ats_runtime::{ModelRequestError, ModelRequestLimits};
 use figment::Figment;
 use figment::providers::{Env, Format, Json, Serialized};
 use serde::{Deserialize, Serialize};
@@ -50,6 +51,7 @@ pub struct LlmConfig {
     pub api_key: String,
     pub base_url: String,
     pub custom_prompt: String,
+    pub max_output_tokens: Option<u32>,
     pub openai_response_format: OpenAiResponseFormat,
     pub retry_initial_delay_ms: u64,
     pub retry_followup_delay_ms: u64,
@@ -73,10 +75,17 @@ impl Default for LlmConfig {
             api_key: String::new(),
             base_url: String::new(),
             custom_prompt: String::new(),
+            max_output_tokens: None,
             openai_response_format: OpenAiResponseFormat::JsonSchema,
             retry_initial_delay_ms: 120_000,
             retry_followup_delay_ms: 300_000,
         }
+    }
+}
+
+impl LlmConfig {
+    pub fn model_request_limits(&self) -> Result<ModelRequestLimits, ModelRequestError> {
+        ModelRequestLimits::new(self.max_output_tokens)
     }
 }
 
@@ -358,6 +367,7 @@ mod tests {
 
         assert_eq!(settings.llm.retry_initial_delay_ms, 120_000);
         assert_eq!(settings.llm.retry_followup_delay_ms, 300_000);
+        assert_eq!(settings.llm.max_output_tokens, None);
         assert_eq!(
             settings.llm.openai_response_format,
             OpenAiResponseFormat::JsonSchema
@@ -400,6 +410,32 @@ mod tests {
         );
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn llm_config_builds_validated_model_request_limits() {
+        let settings: Settings = serde_json::from_str(
+            r#"{
+                "llm": {
+                    "max_output_tokens": 4096
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.llm.max_output_tokens, Some(4_096));
+        assert_eq!(
+            settings
+                .llm
+                .model_request_limits()
+                .unwrap()
+                .resolve_max_output_tokens(16_384),
+            Ok(4_096)
+        );
+
+        let mut invalid = settings.llm;
+        invalid.max_output_tokens = Some(0);
+        assert!(invalid.model_request_limits().is_err());
     }
 
     #[test]

@@ -166,7 +166,7 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
 - Checkpoint-free and repair-output evidence enters Runtime as the common
   `ExecutionOutputFeedback` value object. Do not grow parallel positional-argument APIs or decode
   `GenerationFeedbackEnvelope` below Feature code.
-- Composition Generate request v6 and Blueprint v6 fix `until_passed` or `max_rounds(1..20)` before graph creation.
+- Composition Generate request v6 and Blueprint v7 fix `until_passed` or `max_rounds(1..20)` before graph creation.
   The limit is the total semantic-feedback budget across the complete graph, never a per-node
   multiplier. `until_passed` uses the same absolute 20-round safety ceiling; it does not mean
   unbounded requests. Direct `mod.generate.single` remains strict and single-request. Composition may feed
@@ -530,7 +530,7 @@ runtime capability detection.
 ```rust
 // crates/ats-runtime/src/model.rs
 pub struct ModelRequestLimits {
-    pub max_output_tokens: Option<u32>,
+    // private validated state; construct through new/default
 }
 
 // crates/ats-features/src/prompt/mod.rs
@@ -565,10 +565,10 @@ provider-native body therefore contain exactly the same value.
 The limits argument is mandatory on the production Recipe render path; retaining an uncapped
 production overload would make configuration application dependent on individual Feature callers.
 
-The Adapter transports the already resolved value and must not cap it again. Settings changes affect
-newly rendered requests only. Existing graph checkpoints and request identities are immutable; a
-different effective budget cannot be passed off as the same snapshot/hash or silently substituted
-during Resume.
+The Adapter transports the already resolved value and must not cap it again. Direct Runs resolve
+current Settings at execution start. Staged Plan/Generate pin validated limits in their blueprint at
+Graph creation; Resume uses that pinned value even when current Settings differ. Existing graph
+checkpoints and request identities remain immutable, and only a new Graph can adopt changed limits.
 
 The System page owns one advanced numeric setting. Ordinary Plan, Single, Composition and Character
 surfaces do not expose tokens, automatic model selection, retry policy or capability probes. The
@@ -585,7 +585,7 @@ files or relaxes typed decoding.
 | configured zero, negative/non-integer, or above 65,536 | reject configuration before snapshot/queue/HTTP | `model.configuration` |
 | Provider rejects the effective request | no automatic budget/model/format change | originating typed provider failure |
 | response reaches the effective limit without a complete typed output | strict decode retains truncation | `model.output_truncated` |
-| Resume would change a pinned request identity | no checkpoint or hash rewrite | existing graph drift/conflict family |
+| current Settings differ while a Graph resumes | use blueprint-pinned limits; no checkpoint or hash rewrite | continue the existing Graph identity |
 
 #### 5. Good / Base / Bad Cases
 

@@ -269,6 +269,7 @@ pub struct CompositionGenerateContext<'a> {
     pub project_context: &'a str,
     pub custom_instructions: Option<&'a str>,
     pub model: Option<String>,
+    pub model_request_limits: ats_runtime::ModelRequestLimits,
 }
 
 pub struct CompositionGenerateDependencies<'a, C, I, R, W, S, V, A, B, P>

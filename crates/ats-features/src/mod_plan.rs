@@ -168,6 +168,7 @@ pub struct ModPlanContext<'a> {
     pub project_context: Option<&'a str>,
     pub custom_instructions: Option<&'a str>,
     pub model: Option<String>,
+    pub model_request_limits: ats_runtime::ModelRequestLimits,
     pub authoritative_definition: Option<&'a StoredItemDefinition>,
 }
 
@@ -277,7 +278,9 @@ impl ModPlanService {
             ),
             ("request.requirements".into(), request.requirements.clone()),
         ]);
-        let model_request = self.recipe.render(&slots, context.model)?;
+        let model_request =
+            self.recipe
+                .render(&slots, context.model, &context.model_request_limits)?;
         let snapshot = ModelRequestSnapshot::new(
             ModPlanFeature::id(),
             self.recipe.recipe_ref(),
@@ -625,6 +628,7 @@ mod tests {
                         project_context: None,
                         custom_instructions: Some("CUSTOM-CANARY"),
                         model: None,
+                        model_request_limits: ats_runtime::ModelRequestLimits::default(),
                         authoritative_definition: None,
                     },
                     &CancellationToken::new(),
@@ -664,6 +668,7 @@ mod tests {
                         project_context: None,
                         custom_instructions: None,
                         model: None,
+                        model_request_limits: ats_runtime::ModelRequestLimits::default(),
                         authoritative_definition: None
                     },
                     &CancellationToken::new()
@@ -691,6 +696,7 @@ mod tests {
                     project_context: None,
                     custom_instructions: None,
                     model: None,
+                    model_request_limits: ats_runtime::ModelRequestLimits::default(),
                     authoritative_definition: None,
                 },
                 &CancellationToken::new(),
@@ -729,6 +735,7 @@ mod tests {
                     project_context: None,
                     custom_instructions: None,
                     model: None,
+                    model_request_limits: ats_runtime::ModelRequestLimits::default(),
                     authoritative_definition: Some(&definition),
                 },
                 &CancellationToken::new(),

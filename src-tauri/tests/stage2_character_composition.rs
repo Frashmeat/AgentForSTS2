@@ -197,6 +197,7 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
                 project_context: Some("Fresh STS2 Character machine-gate project"),
                 custom_instructions: None,
                 model: None,
+                model_request_limits: ats_runtime::ModelRequestLimits::default(),
             },
             &CancellationToken::new(),
         )
@@ -434,6 +435,7 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
         project_context: "Fresh STS2 Character machine-gate project",
         custom_instructions: None,
         model: None,
+        model_request_limits: ats_runtime::ModelRequestLimits::default(),
     };
     let plan_service = ModPlanService::built_in().unwrap();
     let single_service = SingleGenerateService::built_in().unwrap();
@@ -680,6 +682,7 @@ async fn sts2_standard_and_custom_profiles_build_valid_35_to_43_node_drafts() {
                     project_context: Some("O6 scale gate"),
                     custom_instructions: None,
                     model: None,
+                    model_request_limits: ats_runtime::ModelRequestLimits::default(),
                 },
                 &CancellationToken::new(),
             )

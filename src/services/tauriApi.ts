@@ -876,6 +876,7 @@ export interface LlmSnapshot {
   model: string;
   baseUrl: string;
   customPrompt: string;
+  maxOutputTokens: number | null;
   apiKeyMasked: string;
   apiKeyConfigured: boolean;
 }
@@ -912,6 +913,7 @@ export interface SettingsPatch {
     model: string;
     baseUrl: string;
     customPrompt: string;
+    maxOutputTokens: number | null;
     apiKey: string;
   }> | null;
   imageGen?: Partial<{

@@ -89,6 +89,7 @@ impl HttpModelClient {
             || config.retry_followup_delay_ms == 0
             || config.retry_initial_delay_ms > 3_600_000
             || config.retry_followup_delay_ms > 3_600_000
+            || config.model_request_limits().is_err()
         {
             return Err(ModelError::Configuration);
         }
@@ -474,17 +475,21 @@ async fn parse_anthropic(response: reqwest::Response) -> Result<ModelResponse, M
 }
 
 fn check_status(response: &reqwest::Response) -> Result<(), ModelError> {
-    match response.status() {
+    let retry_after_ms = response
+        .headers()
+        .get("retry-after")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(|seconds| seconds.saturating_mul(1_000));
+    classify_status(response.status(), retry_after_ms)
+}
+
+fn classify_status(status: StatusCode, retry_after_ms: Option<u64>) -> Result<(), ModelError> {
+    match status {
         status if status.is_success() => Ok(()),
-        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(ModelError::Authentication),
-        StatusCode::TOO_MANY_REQUESTS => Err(ModelError::RateLimited {
-            retry_after_ms: response
-                .headers()
-                .get("retry-after")
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.parse::<u64>().ok())
-                .map(|seconds| seconds.saturating_mul(1_000)),
-        }),
+        StatusCode::UNAUTHORIZED => Err(ModelError::Authentication),
+        StatusCode::FORBIDDEN => Err(ModelError::Rejected),
+        StatusCode::TOO_MANY_REQUESTS => Err(ModelError::RateLimited { retry_after_ms }),
         status if status.is_server_error() => Err(ModelError::Transport),
         _ => Err(ModelError::Rejected),
     }
@@ -1123,5 +1128,23 @@ mod tests {
                 Err(ModelError::Configuration)
             ));
         }
+    }
+
+    #[test]
+    fn http_status_classification_separates_authentication_and_rejection() {
+        assert_eq!(
+            classify_status(StatusCode::UNAUTHORIZED, None),
+            Err(ModelError::Authentication)
+        );
+        assert_eq!(
+            classify_status(StatusCode::FORBIDDEN, None),
+            Err(ModelError::Rejected)
+        );
+        assert_eq!(
+            classify_status(StatusCode::TOO_MANY_REQUESTS, Some(4_000)),
+            Err(ModelError::RateLimited {
+                retry_after_ms: Some(4_000)
+            })
+        );
     }
 }

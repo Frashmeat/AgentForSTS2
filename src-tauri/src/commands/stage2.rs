@@ -127,6 +127,11 @@ pub async fn submit_feature(
     )?;
     let candidate_run_id = RunId::new();
     let (run, execution_graph) = if submission.feature_id == CompositionPlanFeature::id() {
+        let model_request_limits = config
+            .settings_snapshot()
+            .llm
+            .model_request_limits()
+            .map_err(|_| CommandFailure::model_configuration("run.submit.plan"))?;
         let request = submission
             .request
             .decode::<CompositionPlanRequest>(&CompositionPlanFeature::request_schema())
@@ -135,7 +140,7 @@ pub async fn submit_feature(
             return Err(CommandFailure::composition_invalid("run.submit"));
         }
         let staged = composition
-            .prepare_composition_plan_start(request, candidate_run_id.clone())
+            .prepare_composition_plan_start(request, candidate_run_id.clone(), model_request_limits)
             .map_err(map_plan_prepare_failure)?;
         let request =
             VersionedPayload::from_typed(CompositionPlanFeature::request_schema(), &staged.request)
@@ -145,6 +150,11 @@ pub async fn submit_feature(
             Some(staged.graph),
         )
     } else if submission.feature_id == CompositionGenerateFeature::id() {
+        let model_request_limits = config
+            .settings_snapshot()
+            .llm
+            .model_request_limits()
+            .map_err(|_| CommandFailure::model_configuration("run.submit.generation"))?;
         let request = submission
             .request
             .decode::<CompositionGenerateRequest>(&CompositionGenerateFeature::request_schema())
@@ -159,6 +169,7 @@ pub async fn submit_feature(
                 session.path(),
                 items.as_ref(),
                 resources.as_ref(),
+                model_request_limits,
             )
             .map_err(map_generation_prepare_failure)?;
         let request = VersionedPayload::from_typed(

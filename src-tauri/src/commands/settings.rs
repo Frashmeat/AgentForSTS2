@@ -30,6 +30,7 @@ pub struct LlmSnapshot {
     pub model: String,
     pub base_url: String,
     pub custom_prompt: String,
+    pub max_output_tokens: Option<u32>,
     pub api_key_masked: String,
     pub api_key_configured: bool,
 }
@@ -85,6 +86,7 @@ pub struct LlmPatch {
     pub model: Option<String>,
     pub base_url: Option<String>,
     pub custom_prompt: Option<String>,
+    pub max_output_tokens: Option<Option<u32>>,
     pub api_key: Option<String>,
 }
 
@@ -163,6 +165,9 @@ fn merge_settings_patch(mut settings: Settings, patch: SettingsPatch) -> Command
         replace(&mut settings.llm.model, value.model);
         replace(&mut settings.llm.base_url, value.base_url);
         replace(&mut settings.llm.custom_prompt, value.custom_prompt);
+        if let Some(max_output_tokens) = value.max_output_tokens {
+            settings.llm.max_output_tokens = max_output_tokens;
+        }
         replace(&mut settings.llm.api_key, value.api_key);
     }
     if let Some(value) = patch.image_gen {
@@ -190,6 +195,10 @@ fn merge_settings_patch(mut settings: Settings, patch: SettingsPatch) -> Command
     {
         return Err(CommandFailure::invalid_input("settings.custom_prompt"));
     }
+    settings
+        .llm
+        .model_request_limits()
+        .map_err(|_| CommandFailure::model_configuration("settings.max_output_tokens"))?;
     Ok(settings)
 }
 
@@ -210,6 +219,7 @@ fn snapshot(config: &AppConfig) -> SettingsSnapshot {
             model: settings.llm.model,
             base_url: settings.llm.base_url,
             custom_prompt: settings.llm.custom_prompt,
+            max_output_tokens: settings.llm.max_output_tokens,
             api_key_masked: masked_secret(&settings.llm.api_key),
             api_key_configured: !settings.llm.api_key.is_empty(),
         },
@@ -278,5 +288,52 @@ mod tests {
         )
         .unwrap();
         assert!(cleared.llm.api_key.is_empty());
+    }
+
+    #[test]
+    fn model_output_budget_patch_preserves_sets_clears_and_rejects_invalid_values() {
+        let mut settings = Settings::default();
+        settings.llm.max_output_tokens = Some(8_192);
+        let preserved = merge_settings_patch(settings.clone(), SettingsPatch::default()).unwrap();
+        assert_eq!(preserved.llm.max_output_tokens, Some(8_192));
+
+        let set = merge_settings_patch(
+            settings.clone(),
+            SettingsPatch {
+                llm: Some(LlmPatch {
+                    max_output_tokens: Some(Some(4_096)),
+                    ..LlmPatch::default()
+                }),
+                ..SettingsPatch::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(set.llm.max_output_tokens, Some(4_096));
+
+        let cleared = merge_settings_patch(
+            settings.clone(),
+            SettingsPatch {
+                llm: Some(LlmPatch {
+                    max_output_tokens: Some(None),
+                    ..LlmPatch::default()
+                }),
+                ..SettingsPatch::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(cleared.llm.max_output_tokens, None);
+
+        let invalid = merge_settings_patch(
+            settings,
+            SettingsPatch {
+                llm: Some(LlmPatch {
+                    max_output_tokens: Some(Some(0)),
+                    ..LlmPatch::default()
+                }),
+                ..SettingsPatch::default()
+            },
+        )
+        .unwrap_err();
+        assert_eq!(invalid.0.code.as_str(), "model.configuration");
     }
 }

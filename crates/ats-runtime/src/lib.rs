@@ -39,9 +39,10 @@ pub use execution_graph::{
 };
 pub use media::{MediaClient, MediaError, MediaRequest, MediaRequestSnapshot, MediaResponse};
 pub use model::{
-    FinishReason, ModelClient, ModelError, ModelGamePackRef, ModelMessage, ModelMessageRole,
-    ModelOutputContract, ModelRequest, ModelRequestError, ModelRequestSnapshot, ModelResourceRef,
-    ModelResponse, ModelStream, ModelStreamEvent, RecipeRef, TokenUsage,
+    FinishReason, MAX_MODEL_OUTPUT_TOKENS, ModelClient, ModelError, ModelGamePackRef, ModelMessage,
+    ModelMessageRole, ModelOutputContract, ModelRequest, ModelRequestError, ModelRequestLimits,
+    ModelRequestSnapshot, ModelResourceRef, ModelResponse, ModelStream, ModelStreamEvent,
+    RecipeRef, TokenUsage,
 };
 pub use payload::{PayloadError, VersionedPayload};
 pub use repository::{

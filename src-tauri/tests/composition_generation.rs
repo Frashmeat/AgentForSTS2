@@ -60,6 +60,11 @@ struct QueueModel {
     requests: AtomicUsize,
 }
 
+struct BudgetCheckingModel<'a> {
+    inner: &'a QueueModel,
+    expected_cap: u32,
+}
+
 fn pipeline_registry() -> GamePipelineRegistry {
     let primitives = [
         "feature.mod-plan",
@@ -214,6 +219,41 @@ impl ModelClient for QueueModel {
         Ok(Box::pin(stream::empty::<
             Result<ModelStreamEvent, ModelError>,
         >()))
+    }
+}
+
+#[async_trait]
+impl ModelClient for BudgetCheckingModel<'_> {
+    async fn complete(
+        &self,
+        request: ModelRequestSnapshot,
+        cancellation: &CancellationToken,
+    ) -> Result<ModelResponse, ModelError> {
+        assert_eq!(
+            request.request().max_output_tokens,
+            expected_budget(&request, self.expected_cap)
+        );
+        self.inner.complete(request, cancellation).await
+    }
+
+    async fn stream(
+        &self,
+        request: ModelRequestSnapshot,
+        cancellation: &CancellationToken,
+    ) -> Result<ModelStream, ModelError> {
+        assert_eq!(
+            request.request().max_output_tokens,
+            expected_budget(&request, self.expected_cap)
+        );
+        self.inner.stream(request, cancellation).await
+    }
+}
+
+fn expected_budget(request: &ModelRequestSnapshot, cap: u32) -> u32 {
+    match request.feature_id().as_str() {
+        "mod.plan" => 3_072.min(cap),
+        "mod.generate.single" => 16_384.min(cap),
+        feature => panic!("unexpected model Feature {feature}"),
     }
 }
 
@@ -477,6 +517,7 @@ async fn data_only_provider_executes_without_model_validation_or_toolchain() {
         project_context: "Data-only fixture",
         custom_instructions: None,
         model: None,
+        model_request_limits: ats_runtime::ModelRequestLimits::default(),
     };
     let run_id = ats_runtime::RunId::new();
     let start = service
@@ -692,6 +733,7 @@ async fn succeeded_composition_adjusts_one_item_in_a_new_graph_and_revalidates_t
         project_context: "Fixture project",
         custom_instructions: None,
         model: None,
+        model_request_limits: ats_runtime::ModelRequestLimits::default(),
     };
     let adjustment_run_id = ats_runtime::RunId::new();
     let child = fixture
@@ -868,6 +910,7 @@ async fn composition_adjustment_rejects_a_stale_definition_before_model_work() {
                 project_context: "Fixture project",
                 custom_instructions: None,
                 model: None,
+                model_request_limits: ats_runtime::ModelRequestLimits::default(),
             },
         )
         .unwrap_err();
@@ -961,7 +1004,7 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
         &package_service,
         &pipelines,
     );
-    let context = || CompositionGenerateContext {
+    let context = |max_output_tokens| CompositionGenerateContext {
         pack: &fixture.pack,
         composition_contributions: &composition,
         plan_contributions: &plan,
@@ -974,6 +1017,8 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
         project_context: "Fixture project",
         custom_instructions: None,
         model: None,
+        model_request_limits: ats_runtime::ModelRequestLimits::new(Some(max_output_tokens))
+            .unwrap(),
     };
     let graphs = FileExecutionGraphRepository::new(fixture.project.clone());
     let runs = FileRunRepository::new(fixture.project.clone()).unwrap();
@@ -981,7 +1026,7 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
     let start = service
         .prepare_staged_start(
             fixture.request.clone(),
-            context(),
+            context(4_096),
             &fixture.items,
             &fixture.resources,
             first_run_id.clone(),
@@ -1004,6 +1049,10 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
             "not-json".into(),
         ])),
         requests: AtomicUsize::new(0),
+    };
+    let first_model = BudgetCheckingModel {
+        inner: &first_model,
+        expected_cap: 4_096,
     };
     let writer = FileProjectWriter;
     let stager = FileProjectStager;
@@ -1029,7 +1078,7 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
             &graphs,
             &mut first_run,
             start.request,
-            context(),
+            context(4_096),
             &CancellationToken::new(),
         )
         .await;
@@ -1038,7 +1087,7 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
         Err(error) => error,
     };
     assert_eq!(first.run_failure().code.as_str(), "model.output_invalid");
-    assert_eq!(first_model.requests.load(Ordering::SeqCst), 3);
+    assert_eq!(first_model.inner.requests.load(Ordering::SeqCst), 3);
     let paused = graphs.get(start.graph.id()).unwrap();
     assert_eq!(paused.status(), ats_runtime::ExecutionGraphStatus::Paused);
     let persisted_graph = serde_json::to_string(&paused).unwrap();
@@ -1083,7 +1132,12 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
     let paused_revision = paused.revision();
     let second_run_id = ats_runtime::RunId::new();
     let resumed = service
-        .prepare_staged_resume(paused, paused_revision, second_run_id.clone(), context())
+        .prepare_staged_resume(
+            paused,
+            paused_revision,
+            second_run_id.clone(),
+            context(1_024),
+        )
         .unwrap();
     reopened_graphs
         .compare_and_set(paused_revision, &resumed.graph)
@@ -1108,6 +1162,10 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
         ])),
         requests: AtomicUsize::new(0),
     };
+    let second_model = BudgetCheckingModel {
+        inner: &second_model,
+        expected_cap: 4_096,
+    };
     let execution = service
         .execute_staged(
             CompositionGenerateDependencies {
@@ -1125,12 +1183,12 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
             &reopened_graphs,
             &mut second_run,
             resumed.request,
-            context(),
+            context(1_024),
             &CancellationToken::new(),
         )
         .await
         .unwrap();
-    assert_eq!(second_model.requests.load(Ordering::SeqCst), 3);
+    assert_eq!(second_model.inner.requests.load(Ordering::SeqCst), 3);
     assert_eq!(execution.result.node_count, 2);
     assert_eq!(second_run.status(), RunStatus::Succeeded);
     assert_eq!(
@@ -1145,7 +1203,7 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
             succeeded,
             reopened_graphs.get(resumed.graph.id()).unwrap().revision(),
             third_run_id.clone(),
-            context(),
+            context(1_024),
         )
         .unwrap();
     let mut third_run = RunRecord::new_with_id(
@@ -1181,7 +1239,7 @@ async fn staged_generation_resumes_only_the_failed_single_node() {
             &reopened_graphs,
             &mut third_run,
             reconciled.request,
-            context(),
+            context(1_024),
             &CancellationToken::new(),
         )
         .await
@@ -1251,6 +1309,7 @@ async fn staged_validation_repairs_multiple_items_serially_then_revalidates_the_
         project_context: "Fixture project",
         custom_instructions: None,
         model: None,
+        model_request_limits: ats_runtime::ModelRequestLimits::default(),
     };
     let graphs = FileExecutionGraphRepository::new(fixture.project.clone());
     let runs = FileRunRepository::new(fixture.project.clone()).unwrap();
@@ -1396,6 +1455,7 @@ async fn partially_completed_multi_item_repair_resumes_before_finalize_without_r
         project_context: "Fixture project",
         custom_instructions: None,
         model: None,
+        model_request_limits: ats_runtime::ModelRequestLimits::default(),
     };
     let crashing_graphs = CrashAfterRepairedSingleCheckpoint::new(&fixture.project);
     let runs = FileRunRepository::new(fixture.project.clone()).unwrap();
@@ -1773,6 +1833,7 @@ impl Fixture {
             project_context: "Fixture project",
             custom_instructions: None,
             model: None,
+            model_request_limits: ats_runtime::ModelRequestLimits::default(),
         };
         let service = CompositionGenerateService::new(
             &plan_service,

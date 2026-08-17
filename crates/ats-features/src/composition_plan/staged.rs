@@ -53,6 +53,7 @@ pub struct StagedCompositionStart {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StagedCompositionBlueprint {
     schema_version: u32,
+    model_request_limits: ats_runtime::ModelRequestLimits,
     game_pack_id: GamePackId,
     game_pack_sha256: Sha256Digest,
     draft_id: CompositionDraftId,
@@ -228,7 +229,8 @@ impl CompositionPlanService {
         }
         let root_node_id = root_nodes[0].execution_node_id.clone();
         let blueprint = StagedCompositionBlueprint {
-            schema_version: 1,
+            schema_version: 2,
+            model_request_limits: context.model_request_limits,
             game_pack_id: context.pack.id().clone(),
             game_pack_sha256: context.pack.content_sha256().clone(),
             draft_id: request.draft_id.clone(),
@@ -785,7 +787,12 @@ impl CompositionPlanService {
         let request = self
             .staged_recipes
             .suite_brief
-            .render_with_output_contract(&slots, context.model.clone(), output_contract)?;
+            .render_with_output_contract(
+                &slots,
+                context.model.clone(),
+                output_contract,
+                &blueprint.model_request_limits,
+            )?;
         ModelRequestSnapshot::new(
             CompositionPlanFeature::id(),
             self.staged_recipes.suite_brief.recipe_ref(),
@@ -843,6 +850,7 @@ impl CompositionPlanService {
             &slots,
             context.model.clone(),
             output_contract,
+            &blueprint.model_request_limits,
         )?;
         ModelRequestSnapshot::new(
             CompositionPlanFeature::id(),
@@ -861,7 +869,7 @@ impl CompositionPlanService {
 
 impl StagedCompositionBlueprint {
     fn validate(&self, pack: &LoadedGamePack) -> Result<(), CompositionPlanError> {
-        if self.schema_version != 1
+        if self.schema_version != 2
             || &self.game_pack_id != pack.id()
             || &self.game_pack_sha256 != pack.content_sha256()
             || self.item_nodes.is_empty()
@@ -1026,7 +1034,10 @@ fn staged_item_id(
 }
 
 fn blueprint_schema() -> SchemaRef {
-    schema(BLUEPRINT_SCHEMA_ID)
+    SchemaRef {
+        id: SchemaId::parse(BLUEPRINT_SCHEMA_ID).expect("built-in schema ID is valid"),
+        version: SchemaVersion::new(2).expect("built-in schema version is valid"),
+    }
 }
 
 fn suite_brief_schema() -> SchemaRef {
@@ -1653,7 +1664,8 @@ mod tests {
             depends_on: Vec::new(),
         };
         let blueprint = StagedCompositionBlueprint {
-            schema_version: 1,
+            schema_version: 2,
+            model_request_limits: ats_runtime::ModelRequestLimits::default(),
             game_pack_id: pack.id().clone(),
             game_pack_sha256: pack.content_sha256().clone(),
             draft_id: CompositionDraftId::parse("zero-target-draft").unwrap(),

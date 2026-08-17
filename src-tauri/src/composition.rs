@@ -46,8 +46,8 @@ use ats_game_context::{
 use ats_game_sts2::Sts2PipelineProvider;
 use ats_kernel::{FailureCode, FeatureId, PrimitiveId, SchemaVersion};
 use ats_runtime::{
-    CancellationToken, MediaError, ModelClient, RunFailure, RunRecord, RunRepository, RunStatus,
-    RunTransition, VersionedPayload,
+    CancellationToken, MediaError, ModelClient, ModelRequestLimits, RunFailure, RunRecord,
+    RunRepository, RunStatus, RunTransition, VersionedPayload,
 };
 use ats_workspace::{LocalBuildPaths, ProjectMeta, sync_or_validate_project_local_props};
 use chrono::Utc;
@@ -151,6 +151,7 @@ impl Stage2Composition {
         &self,
         request: CompositionPlanRequest,
         run_id: ats_runtime::RunId,
+        model_request_limits: ModelRequestLimits,
     ) -> Result<StagedCompositionStart, RunFailure> {
         let truth = self.current_truth()?;
         let contributions = self.resolve(
@@ -168,6 +169,7 @@ impl Stage2Composition {
                     project_context: None,
                     custom_instructions: None,
                     model: None,
+                    model_request_limits,
                 },
                 run_id,
             )
@@ -198,6 +200,7 @@ impl Stage2Composition {
                     project_context: None,
                     custom_instructions: None,
                     model: None,
+                    model_request_limits: ModelRequestLimits::default(),
                 },
             )
             .map_err(|error| error.run_failure())
@@ -210,6 +213,7 @@ impl Stage2Composition {
         project_root: &Path,
         items: &FileItemRepository,
         resources: &FileResourceRepository,
+        model_request_limits: ModelRequestLimits,
     ) -> Result<StagedCompositionGenerateStart, RunFailure> {
         let truth = self.current_truth()?;
         let composition_contributions = self.resolve(
@@ -266,6 +270,7 @@ impl Stage2Composition {
                 project_context: "",
                 custom_instructions: None,
                 model: None,
+                model_request_limits,
             },
             items,
             resources,
@@ -338,6 +343,7 @@ impl Stage2Composition {
                 project_context: "",
                 custom_instructions: None,
                 model: None,
+                model_request_limits: ModelRequestLimits::default(),
             },
         )
         .map_err(|error| error.run_failure())
@@ -409,6 +415,7 @@ impl Stage2Composition {
                 project_context: "",
                 custom_instructions: None,
                 model: None,
+                model_request_limits: ModelRequestLimits::default(),
             },
         )
         .map_err(|error| error.run_failure())
@@ -555,8 +562,11 @@ impl Stage2Composition {
                     &ProjectPackageFeature::id(),
                     ProjectPackageFeature::contribution_requirement(),
                 )?;
-                let model =
-                    select_model(model_override, &settings.llm, Arc::clone(&self.model_queue))?;
+                let model = select_staged_model(
+                    model_override,
+                    &settings.llm,
+                    Arc::clone(&self.model_queue),
+                )?;
                 let plan = ModPlanService::built_in().map_err(|_| {
                     failure("feature.recipe_invalid", "composition.generate.plan_recipe")
                 })?;
@@ -604,6 +614,7 @@ impl Stage2Composition {
                             project_context: &project_context,
                             custom_instructions,
                             model: model_name,
+                            model_request_limits: ModelRequestLimits::default(),
                         },
                         cancellation,
                     )
@@ -617,8 +628,11 @@ impl Stage2Composition {
                     &CompositionPlanFeature::id(),
                     &[CompositionPlanFeature::contribution_requirement()],
                 )?;
-                let model =
-                    select_model(model_override, &settings.llm, Arc::clone(&self.model_queue))?;
+                let model = select_staged_model(
+                    model_override,
+                    &settings.llm,
+                    Arc::clone(&self.model_queue),
+                )?;
                 let service = CompositionPlanService::built_in()
                     .map_err(|_| failure("feature.recipe_invalid", "composition.plan.recipe"))?;
                 let plan_context = CompositionPlanContext {
@@ -628,6 +642,7 @@ impl Stage2Composition {
                     project_context: Some(&project_context),
                     custom_instructions,
                     model: model_name,
+                    model_request_limits: ModelRequestLimits::default(),
                 };
                 if request.execution.is_none() {
                     return Err(failure("run.input_invalid", "composition.plan.execution"));
@@ -649,6 +664,7 @@ impl Stage2Composition {
                 succeed::<CompositionPlanFeature, _>(&mut run, &result)?;
             }
             "composition.retry-node" => {
+                let model_request_limits = request_limits(&settings.llm)?;
                 let request = self.decode::<CompositionRetryNodeFeature>(&run)?;
                 let truth = self.current_truth()?;
                 let plan_contributions = self.resolve(
@@ -677,6 +693,7 @@ impl Stage2Composition {
                             project_context: Some(&project_context),
                             custom_instructions,
                             model: model_name,
+                            model_request_limits,
                         },
                         cancellation,
                     )
@@ -685,6 +702,7 @@ impl Stage2Composition {
                 succeed::<CompositionRetryNodeFeature, _>(&mut run, &execution.result)?;
             }
             "mod.plan" => {
+                let model_request_limits = request_limits(&settings.llm)?;
                 let request = self.decode::<ModPlanFeature>(&run)?;
                 let contributions = self.resolve(
                     &ModPlanFeature::id(),
@@ -703,6 +721,7 @@ impl Stage2Composition {
                             project_context: Some(&project_context),
                             custom_instructions,
                             model: model_name,
+                            model_request_limits,
                             authoritative_definition: None,
                         },
                         cancellation,
@@ -712,6 +731,7 @@ impl Stage2Composition {
                 succeed::<ModPlanFeature, _>(&mut run, &execution.item)?;
             }
             "mod.generate.single" => {
+                let model_request_limits = request_limits(&settings.llm)?;
                 let request = self.decode::<SingleGenerateFeature>(&run)?;
                 let truth = self.current_truth()?;
                 let single = self.resolve(
@@ -740,6 +760,7 @@ impl Stage2Composition {
                             project_context: &project_context,
                             custom_instructions,
                             model: model_name,
+                            model_request_limits,
                         },
                         cancellation,
                     )
@@ -747,6 +768,7 @@ impl Stage2Composition {
                     .map_err(|error| error.run_failure())?;
             }
             "mod.generate.batch" => {
+                let model_request_limits = request_limits(&settings.llm)?;
                 let request = self.decode::<BatchGenerateFeature>(&run)?;
                 let truth = self.current_truth()?;
                 let batch_contributions = self.resolve(
@@ -789,6 +811,7 @@ impl Stage2Composition {
                             project_context: &project_context,
                             custom_instructions,
                             model: model_name,
+                            model_request_limits,
                         },
                         cancellation,
                     )
@@ -799,6 +822,7 @@ impl Stage2Composition {
                 persist_children(repository, execution.child_runs)?;
             }
             "mod.generate.complex" => {
+                let model_request_limits = request_limits(&settings.llm)?;
                 let request = self.decode::<ComplexGenerateFeature>(&run)?;
                 let truth = self.current_truth()?;
                 let complex_contributions = self.resolve(
@@ -875,6 +899,7 @@ impl Stage2Composition {
                             project_context: &project_context,
                             custom_instructions,
                             model: model_name,
+                            model_request_limits,
                         },
                         cancellation,
                     )
@@ -885,6 +910,7 @@ impl Stage2Composition {
                 persist_children(repository, execution.child_runs)?;
             }
             "log.analyze" => {
+                let model_request_limits = request_limits(&settings.llm)?;
                 let request = self.decode::<LogAnalyzeFeature>(&run)?;
                 let truth = self.current_truth()?;
                 let contributions = self.resolve(
@@ -911,6 +937,7 @@ impl Stage2Composition {
                             project_context: Some(&project_context),
                             custom_instructions,
                             model: model_name,
+                            model_request_limits,
                         },
                         cancellation,
                     )
@@ -1053,10 +1080,26 @@ fn select_model<'a>(
         || {
             HttpModelClient::new_with_queue(config, queue)
                 .map(SelectedModel::Owned)
-                .map_err(|_| failure("llm.configuration", "feature.model"))
+                .map_err(|_| failure("model.configuration", "feature.model"))
         },
         |client| Ok(SelectedModel::Borrowed(client)),
     )
+}
+
+fn select_staged_model<'a>(
+    model: Option<&'a dyn ModelClient>,
+    config: &ats_adapters::LlmConfig,
+    queue: Arc<ModelRequestQueue>,
+) -> Result<SelectedModel<'a>, RunFailure> {
+    let mut transport_config = config.clone();
+    transport_config.max_output_tokens = None;
+    select_model(model, &transport_config, queue)
+}
+
+fn request_limits(config: &ats_adapters::LlmConfig) -> Result<ModelRequestLimits, RunFailure> {
+    config
+        .model_request_limits()
+        .map_err(|_| failure("model.configuration", "feature.model"))
 }
 
 struct SingleAdapters {

@@ -119,6 +119,7 @@ pub struct BatchGenerateContext<'a> {
     pub project_context: &'a str,
     pub custom_instructions: Option<&'a str>,
     pub model: Option<String>,
+    pub model_request_limits: ats_runtime::ModelRequestLimits,
 }
 
 pub struct BatchGenerateExecution {
@@ -188,6 +189,7 @@ impl<'a> BatchGenerateService<'a> {
                         project_context: Some(context.project_context),
                         custom_instructions: context.custom_instructions,
                         model: context.model.clone(),
+                        model_request_limits: context.model_request_limits,
                         authoritative_definition: Some(&item.definition),
                     },
                     cancellation,
@@ -284,6 +286,7 @@ impl<'a> BatchGenerateService<'a> {
                         project_context: context.project_context,
                         custom_instructions: context.custom_instructions,
                         model: context.model.clone(),
+                        model_request_limits: context.model_request_limits,
                     },
                     cancellation,
                 )

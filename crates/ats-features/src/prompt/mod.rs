@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 
 use ats_kernel::{FeatureId, RecipeId, SchemaVersion, Sha256Digest};
-use ats_runtime::{ModelMessage, ModelMessageRole, ModelOutputContract, ModelRequest, RecipeRef};
+use ats_runtime::{
+    MAX_MODEL_OUTPUT_TOKENS, ModelMessage, ModelMessageRole, ModelOutputContract, ModelRequest,
+    ModelRequestLimits, RecipeRef,
+};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -55,8 +58,9 @@ impl FeatureRecipe {
         &self,
         values: &BTreeMap<String, String>,
         model: Option<String>,
+        limits: &ModelRequestLimits,
     ) -> Result<ModelRequest, FeatureRecipeError> {
-        self.render_with_output_contract(values, model, self.output_contract.clone())
+        self.render_with_output_contract(values, model, self.output_contract.clone(), limits)
     }
 
     pub fn render_with_output_contract(
@@ -64,6 +68,7 @@ impl FeatureRecipe {
         values: &BTreeMap<String, String>,
         model: Option<String>,
         output_contract: ModelOutputContract,
+        limits: &ModelRequestLimits,
     ) -> Result<ModelRequest, FeatureRecipeError> {
         if output_contract.schema != self.output_contract.schema
             || !output_contract.json_schema.is_object()
@@ -107,7 +112,9 @@ impl FeatureRecipe {
         Ok(ModelRequest {
             messages,
             output_contract,
-            max_output_tokens: self.max_output_tokens,
+            max_output_tokens: limits
+                .resolve_max_output_tokens(self.max_output_tokens)
+                .map_err(|_| FeatureRecipeError::InvalidContract)?,
             temperature: self.temperature,
             model,
         })
@@ -249,7 +256,7 @@ fn validate_raw(raw: &RawFeatureRecipe) -> Result<(), FeatureRecipeError> {
         || raw.slots.is_empty()
         || raw.slots.len() > 32
         || raw.max_output_tokens == 0
-        || raw.max_output_tokens > 65_536
+        || raw.max_output_tokens > MAX_MODEL_OUTPUT_TOKENS
         || raw
             .temperature
             .is_some_and(|value| !value.is_finite() || !(0.0..=2.0).contains(&value))
@@ -407,7 +414,9 @@ mod tests {
             ("request.alpha".into(), "{{request.beta}}".into()),
             ("request.beta".into(), "literal".into()),
         ]);
-        let request = recipe.render(&values, None).unwrap();
+        let request = recipe
+            .render(&values, None, &ModelRequestLimits::default())
+            .unwrap();
         assert_eq!(request.messages[0].content, "A={{request.beta}} B=literal");
     }
 
@@ -431,23 +440,60 @@ mod tests {
         ));
         let recipe = load(bytes);
         assert!(matches!(
-            recipe.render(&BTreeMap::new(), None),
+            recipe.render(&BTreeMap::new(), None, &ModelRequestLimits::default()),
             Err(FeatureRecipeError::MissingSlot)
         ));
         assert!(matches!(
             recipe.render(
                 &BTreeMap::from([("request.other".into(), "x".into())]),
-                None
+                None,
+                &ModelRequestLimits::default()
             ),
             Err(FeatureRecipeError::UnexpectedSlot)
         ));
         assert!(matches!(
             recipe.render(
                 &BTreeMap::from([("request.value".into(), "12345".into())]),
-                None
+                None,
+                &ModelRequestLimits::default()
             ),
             Err(FeatureRecipeError::SlotTooLarge)
         ));
+    }
+
+    #[test]
+    fn renderer_resolves_the_configured_budget_before_snapshot_assembly() {
+        let bytes = br#"{
+          "schemaVersion":1,
+          "id":"recipe.fixture",
+          "featureId":"fixture.analyze",
+          "version":1,
+          "messages":[{"role":"user","template":"{{request.value}}"}],
+          "slots":[{"id":"request.value","required":true,"maxChars":16}],
+          "outputContract":{"schema":{"id":"feature.fixture-result","version":1},"jsonSchema":{"type":"object"}},
+          "maxOutputTokens":16384,
+          "temperature":null
+        }"#;
+        let recipe = load(bytes);
+        let values = BTreeMap::from([("request.value".into(), "fixture".into())]);
+
+        let capped = recipe
+            .render(
+                &values,
+                None,
+                &ModelRequestLimits::new(Some(4_096)).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(capped.max_output_tokens, 4_096);
+
+        let unchanged = recipe
+            .render(
+                &values,
+                None,
+                &ModelRequestLimits::new(Some(32_768)).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(unchanged.max_output_tokens, 16_384);
     }
 
     #[test]
@@ -479,6 +525,7 @@ mod tests {
                 &BTreeMap::from([("output.contract".into(), rendered.clone())]),
                 None,
                 contract.clone(),
+                &ModelRequestLimits::default(),
             )
             .unwrap();
         assert_eq!(request.output_contract, contract);
@@ -488,6 +535,7 @@ mod tests {
                 &BTreeMap::from([("output.contract".into(), "different".into())]),
                 None,
                 contract.clone(),
+                &ModelRequestLimits::default(),
             ),
             Err(FeatureRecipeError::InvalidContract)
         ));
@@ -499,6 +547,7 @@ mod tests {
                 &BTreeMap::from([("output.contract".into(), rendered)]),
                 None,
                 wrong_identity,
+                &ModelRequestLimits::default(),
             ),
             Err(FeatureRecipeError::InvalidContract)
         ));

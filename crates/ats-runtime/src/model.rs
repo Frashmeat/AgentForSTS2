@@ -11,6 +11,64 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const MODEL_REQUEST_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+pub const MAX_MODEL_OUTPUT_TOKENS: u32 = 65_536;
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelRequestLimits {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_output_tokens: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ModelRequestLimitsWire {
+    #[serde(default)]
+    max_output_tokens: Option<u32>,
+}
+
+impl<'de> Deserialize<'de> for ModelRequestLimits {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = ModelRequestLimitsWire::deserialize(deserializer)?;
+        Self::new(wire.max_output_tokens).map_err(serde::de::Error::custom)
+    }
+}
+
+impl ModelRequestLimits {
+    pub fn new(max_output_tokens: Option<u32>) -> Result<Self, ModelRequestError> {
+        let limits = Self { max_output_tokens };
+        limits.validate()?;
+        Ok(limits)
+    }
+
+    pub fn resolve_max_output_tokens(
+        &self,
+        recipe_max_output_tokens: u32,
+    ) -> Result<u32, ModelRequestError> {
+        self.validate()?;
+        if recipe_max_output_tokens == 0 || recipe_max_output_tokens > MAX_MODEL_OUTPUT_TOKENS {
+            return Err(ModelRequestError::InvalidRequest);
+        }
+        Ok(self
+            .max_output_tokens
+            .map_or(recipe_max_output_tokens, |configured| {
+                recipe_max_output_tokens.min(configured)
+            }))
+    }
+
+    fn validate(&self) -> Result<(), ModelRequestError> {
+        if self
+            .max_output_tokens
+            .is_some_and(|value| value == 0 || value > MAX_MODEL_OUTPUT_TOKENS)
+        {
+            return Err(ModelRequestError::InvalidRequest);
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -47,7 +105,7 @@ impl ModelRequest {
                 message.content.is_empty() || message.content.chars().count() > 200_000
             })
             || self.max_output_tokens == 0
-            || self.max_output_tokens > 65_536
+            || self.max_output_tokens > MAX_MODEL_OUTPUT_TOKENS
             || self
                 .temperature
                 .is_some_and(|value| !value.is_finite() || !(0.0..=2.0).contains(&value))
@@ -433,6 +491,13 @@ mod tests {
     }
 
     fn request(resources: Vec<ModelResourceRef>) -> ModelRequestSnapshot {
+        request_with_budget(resources, 512)
+    }
+
+    fn request_with_budget(
+        resources: Vec<ModelResourceRef>,
+        max_output_tokens: u32,
+    ) -> ModelRequestSnapshot {
         ModelRequestSnapshot::new(
             FeatureId::parse("fixture.analyze").unwrap(),
             RecipeRef {
@@ -458,7 +523,7 @@ mod tests {
                     },
                     json_schema: serde_json::json!({"type":"object"}),
                 },
-                max_output_tokens: 512,
+                max_output_tokens,
                 temperature: Some(0.0),
                 model: None,
             },
@@ -521,6 +586,49 @@ mod tests {
                 request(Vec::new()).request,
             ),
             Err(ModelRequestError::DuplicateResource)
+        );
+    }
+
+    #[test]
+    fn model_request_limits_only_reduce_recipe_budgets() {
+        let configured = ModelRequestLimits::new(Some(4_096)).unwrap();
+        assert_eq!(configured.resolve_max_output_tokens(16_384), Ok(4_096));
+        assert_eq!(configured.resolve_max_output_tokens(3_072), Ok(3_072));
+        assert_eq!(
+            ModelRequestLimits::default().resolve_max_output_tokens(16_384),
+            Ok(16_384)
+        );
+    }
+
+    #[test]
+    fn request_snapshot_hash_binds_the_effective_output_budget() {
+        let lower = request_with_budget(Vec::new(), 4_096);
+        let higher = request_with_budget(Vec::new(), 8_192);
+
+        assert_eq!(lower.request().max_output_tokens, 4_096);
+        assert_eq!(higher.request().max_output_tokens, 8_192);
+        assert_ne!(lower.request_sha256(), higher.request_sha256());
+    }
+
+    #[test]
+    fn model_request_limits_reject_invalid_bounds() {
+        assert_eq!(
+            ModelRequestLimits::new(Some(0)),
+            Err(ModelRequestError::InvalidRequest)
+        );
+        assert_eq!(
+            ModelRequestLimits::new(Some(MAX_MODEL_OUTPUT_TOKENS + 1)),
+            Err(ModelRequestError::InvalidRequest)
+        );
+        assert_eq!(
+            ModelRequestLimits::default().resolve_max_output_tokens(0),
+            Err(ModelRequestError::InvalidRequest)
+        );
+        assert!(
+            serde_json::from_value::<ModelRequestLimits>(serde_json::json!({
+                "maxOutputTokens": 0
+            }))
+            .is_err()
         );
     }
 }

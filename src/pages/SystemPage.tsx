@@ -3,7 +3,7 @@ import { ExternalLink, RefreshCw, Save } from "lucide-react";
 
 import { ActionableErrorNotice } from "@/components/ActionableErrorNotice";
 import { Badge, Button, Card, Field, PageHero } from "@/components/ui";
-import { buildPatch, formFromSnapshot, type FormState } from "@/pages/systemForm";
+import { buildPatch, formFromSnapshot, validateMaxOutputTokens, type FormState } from "@/pages/systemForm";
 import { api } from "@/services/api";
 import { toActionableFailure, type ActionableFailure } from "@/services/actionableFailure";
 import type { SettingsSnapshot } from "@/services/tauriApi";
@@ -13,6 +13,7 @@ export function SystemPage() {
   const [form, setForm] = useState<FormState | null>(null);
   const [failure, setFailure] = useState<ActionableFailure | null>(null);
   const [busy, setBusy] = useState(false);
+  const maxOutputTokensError = form ? validateMaxOutputTokens(form.llmMaxOutputTokens) : null;
 
   async function reload() {
     setBusy(true); setFailure(null);
@@ -41,7 +42,7 @@ export function SystemPage() {
         <div className="flex gap-2">
           <Button size="sm" onClick={() => void reload()} disabled={busy}><RefreshCw size={15} /> Reload</Button>
           <Button size="sm" variant="accent" onClick={() => void api.openConfigInEditor()} disabled={busy}><ExternalLink size={15} /> Open</Button>
-          <Button data-testid="settings-save" size="sm" variant="success" onClick={() => void save()} disabled={busy || !form}><Save size={15} /> Save</Button>
+          <Button data-testid="settings-save" size="sm" variant="success" onClick={() => void save()} disabled={busy || !form || Boolean(maxOutputTokensError)}><Save size={15} /> Save</Button>
         </div>
       } />
       {failure && <div data-testid="settings-error"><ActionableErrorNotice failure={failure} /></div>}
@@ -54,6 +55,9 @@ export function SystemPage() {
             </div>
             <Field label="Base URL"><input className="input-mono" value={form.llmBaseUrl} onChange={(event) => setForm({ ...form, llmBaseUrl: event.target.value })} /></Field>
             <Field label="Custom instructions"><textarea className="input-mono min-h-32" value={form.llmCustomPrompt} onChange={(event) => setForm({ ...form, llmCustomPrompt: event.target.value })} /></Field>
+            <Field label="Maximum output tokens" hint={maxOutputTokensError}>
+              <input data-testid="llm-max-output-tokens" type="number" min={1} max={65536} step={1} className="input-mono" value={form.llmMaxOutputTokens} aria-invalid={Boolean(maxOutputTokensError)} onChange={(event) => setForm({ ...form, llmMaxOutputTokens: event.target.value })} />
+            </Field>
             <Field label="API key"><input type="password" className="input-mono" value={form.llmApiKey} placeholder={snapshot.llm.apiKeyConfigured ? "unchanged" : ""} onChange={(event) => setForm({ ...form, llmApiKey: event.target.value, llmApiKeyTouched: true })} /></Field>
           </Card>
           <Card eyebrow="media" title="Image generation" actions={<Badge variant={snapshot.imageGen.apiKeyConfigured ? "ok" : "warn"}>{snapshot.imageGen.apiKeyConfigured ? "configured" : "missing key"}</Badge>}>

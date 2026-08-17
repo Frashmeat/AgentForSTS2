@@ -565,6 +565,7 @@ impl Fixture {
             project_context: "An isolated SDK-style test project.",
             custom_instructions: Some("CUSTOM-CANARY"),
             model: None,
+            model_request_limits: ats_runtime::ModelRequestLimits::default(),
         }
     }
 
@@ -1207,6 +1208,7 @@ async fn batch_generates_all_four_definition_bound_sts2_types_with_real_compile(
                 project_context: "Four definition-bound STS2 items.",
                 custom_instructions: None,
                 model: None,
+                model_request_limits: ats_runtime::ModelRequestLimits::default(),
             },
             &CancellationToken::new(),
         )

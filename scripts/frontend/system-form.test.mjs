@@ -12,7 +12,7 @@ after(async () => {
   await vite.close();
 });
 
-const { buildPatch, formFromSnapshot } = await vite.ssrLoadModule(
+const { buildPatch, formFromSnapshot, validateMaxOutputTokens } = await vite.ssrLoadModule(
   "/src/pages/systemForm.ts",
 );
 
@@ -25,6 +25,7 @@ const snapshot = {
     model: "model",
     baseUrl: "https://llm.example/v1",
     customPrompt: "",
+    maxOutputTokens: null,
     apiKeyMasked: "sk-a...-key (len=20)",
     apiKeyConfigured: true,
   },
@@ -94,6 +95,35 @@ test("runtime custom instructions use the typed LLM patch", () => {
   assert.deepEqual(buildPatch(form, snapshot), {
     llm: { customPrompt: "Keep generated names concise." },
   });
+});
+
+test("optional model output budget round trips through the LLM patch", () => {
+  const blank = formFromSnapshot(snapshot);
+  assert.equal(blank.llmMaxOutputTokens, "");
+  assert.deepEqual(buildPatch(blank, snapshot), {});
+
+  const configured = { ...blank, llmMaxOutputTokens: "4096" };
+  assert.deepEqual(buildPatch(configured, snapshot), {
+    llm: { maxOutputTokens: 4096 },
+  });
+
+  const configuredSnapshot = {
+    ...snapshot,
+    llm: { ...snapshot.llm, maxOutputTokens: 8192 },
+  };
+  const cleared = { ...formFromSnapshot(configuredSnapshot), llmMaxOutputTokens: "" };
+  assert.deepEqual(buildPatch(cleared, configuredSnapshot), {
+    llm: { maxOutputTokens: null },
+  });
+});
+
+test("model output budget validation rejects non-integers and invalid bounds", () => {
+  assert.equal(validateMaxOutputTokens(""), null);
+  assert.equal(validateMaxOutputTokens("1"), null);
+  assert.equal(validateMaxOutputTokens("65536"), null);
+  for (const invalid of ["0", "-1", "1.5", "65537", "value"]) {
+    assert.match(validateMaxOutputTokens(invalid), /whole number/);
+  }
 });
 
 test("an explicitly cleared GitHub token is preserved as an empty patch value", () => {

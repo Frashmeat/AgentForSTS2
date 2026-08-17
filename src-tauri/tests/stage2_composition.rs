@@ -214,6 +214,7 @@ impl Fixture {
             project_context: "Isolated SDK-style project",
             custom_instructions: None,
             model: None,
+            model_request_limits: ats_runtime::ModelRequestLimits::default(),
         }
     }
 
@@ -412,6 +413,7 @@ async fn complex_composes_plan_batch_real_build_and_package() {
                 project_context: "Isolated SDK-style project",
                 custom_instructions: None,
                 model: None,
+                model_request_limits: ats_runtime::ModelRequestLimits::default(),
             },
             &CancellationToken::new(),
         )
@@ -532,6 +534,7 @@ async fn complex_skips_build_and_package_when_an_item_fails() {
                 project_context: "Isolated SDK-style project",
                 custom_instructions: None,
                 model: None,
+                model_request_limits: ats_runtime::ModelRequestLimits::default(),
             },
             &CancellationToken::new(),
         )

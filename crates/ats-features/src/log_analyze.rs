@@ -163,6 +163,7 @@ pub struct LogAnalyzeContext<'a> {
     pub project_context: Option<&'a str>,
     pub custom_instructions: Option<&'a str>,
     pub model: Option<String>,
+    pub model_request_limits: ats_runtime::ModelRequestLimits,
 }
 
 #[derive(Debug, Clone)]
@@ -260,7 +261,9 @@ impl LogAnalyzeService {
             ),
             ("request.log".into(), log),
         ]);
-        let model_request = self.recipe.render(&slots, context.model)?;
+        let model_request =
+            self.recipe
+                .render(&slots, context.model, &context.model_request_limits)?;
         let snapshot = ModelRequestSnapshot::new(
             LogAnalyzeFeature::id(),
             self.recipe.recipe_ref(),
@@ -582,6 +585,7 @@ mod tests {
             project_context: Some("sanitized fixture project"),
             custom_instructions,
             model: None,
+            model_request_limits: ats_runtime::ModelRequestLimits::default(),
         }
     }
 

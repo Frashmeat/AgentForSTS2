@@ -274,6 +274,7 @@ pub struct SingleGenerateContext<'a> {
     pub project_context: &'a str,
     pub custom_instructions: Option<&'a str>,
     pub model: Option<String>,
+    pub model_request_limits: ats_runtime::ModelRequestLimits,
 }
 
 #[derive(Debug, Clone)]
@@ -1048,6 +1049,7 @@ impl SingleGenerateService {
             &slots,
             context.model.clone(),
             output_contract,
+            &context.model_request_limits,
         )?;
         Ok(ModelRequestSnapshot::new(
             SingleGenerateFeature::id(),
