@@ -516,6 +516,121 @@ required `pack.guidance` slot. That slot is bounded to 64,000 characters. A buil
 must keep the rendered value within this bound and pass the desktop facade Plan tests; overflow is
 `FeatureRecipeError::SlotTooLarge`, persists as `feature.recipe_invalid`, and must not call the model.
 
+### Scenario: Resolve A Configured Model Output Budget
+
+#### 1. Scope / Trigger
+
+This contract applies to every Recipe-backed model request when Settings optionally declare the
+maximum output budget accepted by the configured model/proxy. A Recipe value is the Feature-owned
+business upper bound; the configured value is a user-declared Provider upper bound. This is not
+runtime capability detection.
+
+#### 2. Signatures
+
+```rust
+// crates/ats-runtime/src/model.rs
+pub struct ModelRequestLimits {
+    pub max_output_tokens: Option<u32>,
+}
+
+// crates/ats-features/src/prompt/mod.rs
+impl FeatureRecipe {
+    pub fn render(
+        &self,
+        values: &BTreeMap<String, String>,
+        model: Option<String>,
+        limits: &ModelRequestLimits,
+    ) -> Result<ModelRequest, FeatureRecipeError>;
+}
+
+// crates/ats-adapters/src/config.rs
+pub struct LlmConfig {
+    // existing fields omitted
+    pub max_output_tokens: Option<u32>,
+}
+```
+
+Settings persists `llm.max_output_tokens`; Figment exposes
+`SPIREFORGE_LLM__MAX_OUTPUT_TOKENS`. Tauri Settings DTOs expose nullable/optional camelCase
+`maxOutputTokens`. Blank System input removes the configured cap.
+
+#### 3. Contracts
+
+`effective = min(recipe.max_output_tokens, configured.max_output_tokens)` when configured, and
+`effective = recipe.max_output_tokens` otherwise. Both values must be within `1..=65_536` before
+model work. The effective value is resolved while the Feature renders the request and before
+`ModelRequestSnapshot::new`; the snapshot request, snapshot SHA-256, Runtime `ModelRequest` and
+provider-native body therefore contain exactly the same value.
+
+The limits argument is mandatory on the production Recipe render path; retaining an uncapped
+production overload would make configuration application dependent on individual Feature callers.
+
+The Adapter transports the already resolved value and must not cap it again. Settings changes affect
+newly rendered requests only. Existing graph checkpoints and request identities are immutable; a
+different effective budget cannot be passed off as the same snapshot/hash or silently substituted
+during Resume.
+
+The System page owns one advanced numeric setting. Ordinary Plan, Single, Composition and Character
+surfaces do not expose tokens, automatic model selection, retry policy or capability probes. The
+runtime never reduces the value after a rejection, switches model/endpoint/response format, splits
+files or relaxes typed decoding.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Effective/request result | Stable result |
+| --- | --- | --- |
+| Recipe 16,384; configured 4,096 | snapshot, hash and HTTP body all use 4,096 | continue |
+| Recipe 3,072; configured 4,096 | all layers use 3,072 | continue |
+| no configured value | all layers use the validated Recipe value | continue |
+| configured zero, negative/non-integer, or above 65,536 | reject configuration before snapshot/queue/HTTP | `model.configuration` |
+| Provider rejects the effective request | no automatic budget/model/format change | originating typed provider failure |
+| response reaches the effective limit without a complete typed output | strict decode retains truncation | `model.output_truncated` |
+| Resume would change a pinned request identity | no checkpoint or hash rewrite | existing graph drift/conflict family |
+
+#### 5. Good / Base / Bad Cases
+
+- Good: Single Recipe allows 16,384 and Settings caps at 4,096. The request snapshot hash is computed
+  from 4,096 and OpenAI-compatible `max_tokens` is exactly 4,096.
+- Base: Plan Recipe allows 3,072 and Settings caps at 4,096. The Recipe-owned smaller value remains
+  3,072; the global cap never increases a task budget.
+- Bad: snapshot records 16,384 while the Adapter silently sends 4,096. Run provenance can no longer
+  explain the real request and Resume is not replay-auditable.
+- Bad: a 403 triggers probing with 8,192/4,096, model switching, weaker response format or file
+  splitting. These are separate operator/product decisions, not transport recovery.
+
+#### 6. Tests Required
+
+```powershell
+cargo test -p ats-features prompt -- --nocapture
+cargo test -p ats-adapters config -- --nocapture
+cargo test -p ats-adapters model_client -- --nocapture
+cargo test -p agentthespire-desktop --lib commands::settings
+npm run test:frontend
+npx tsc -b --pretty false
+```
+
+Assertions must cover configured smaller, Recipe smaller, absent cap, every invalid boundary,
+environment override, Settings snapshot/patch round trip, effective value in snapshot/hash and both
+provider bodies, immutable Resume identity, 401/403 separation, and unchanged strict truncation.
+
+#### 7. Wrong vs Correct
+
+Wrong:
+
+```text
+Recipe/snapshot/hash 16384 -> Adapter silently sends 4096
+```
+
+Correct:
+
+```text
+Recipe 16384 + validated Settings 4096
+  -> Feature renders effective 4096
+  -> snapshot/hash 4096
+  -> Runtime request 4096
+  -> Adapter body 4096
+```
+
 ### Scenario: Transport A Typed Output Contract To HTTP Providers
 
 #### 1. Scope / Trigger
@@ -565,6 +680,7 @@ pub enum OpenAiResponseFormat {
 
 pub struct LlmConfig {
     // existing provider/model/credential fields omitted
+    pub max_output_tokens: Option<u32>,
     pub openai_response_format: OpenAiResponseFormat,
     pub retry_initial_delay_ms: u64,
     pub retry_followup_delay_ms: u64,
@@ -610,10 +726,12 @@ Figment environment overrides use `SPIREFORGE_LLM__RETRY_INITIAL_DELAY_MS` and
 | SSE chunk failure, 180-second inactivity, or EOF before `[DONE]` | retryable `ModelError::Transport` | `model.transport_failed` after bounded retries |
 | 2xx SSE Provider error event | `ModelError::Rejected` without retaining its body | `model.request_rejected` |
 | 400/other non-retryable rejection, including unsupported structured output | `ModelError::Rejected` | `model.request_rejected` |
-| 401/403 | `ModelError::Authentication` | `model.authentication` |
+| 401 | `ModelError::Authentication` | `model.authentication` |
+| 403 without trusted structured invalid-key evidence | `ModelError::Rejected` | `model.request_rejected` |
 | 429 | `ModelError::RateLimited` | `model.rate_limited` |
 | transport/5xx after bounded retries | `ModelError::Transport` | `model.transport_failed` |
 | unknown `openai_response_format` during configuration load | configuration remains invalid before model work | `model.configuration` / configuration status |
+| configured output budget is outside `1..=65_536` | configuration remains invalid before snapshot/queue/HTTP | `model.configuration` / configuration status |
 | retry delay is zero or above 3,600,000 ms | construction returns `ModelError::Configuration`; no queue/HTTP work | `model.configuration` / composition-root configuration mapping |
 | another task owns the FIFO slot | wait cancellation-aware; issue no HTTP request | Run remains `running` until acquired or cancelled |
 | cancellation wins while queued | `ModelError::Cancelled`; slot is not retained | `cancelled` through the Run supervisor |

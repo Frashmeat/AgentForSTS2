@@ -31,6 +31,20 @@ Questions to answer:
 - 管理端页面不要再维护一次性 `error/message` 状态条，也不要直接调用 `window.confirm`。
 - 页面内的业务状态展示可以保留，例如健康状态徽标、不可用原因提示、接口返回的最后错误字段；这些是数据展示，不是操作通知。
 
+### System Model Limits
+
+`src/pages/SystemPage.tsx` exposes optional `llm.max_output_tokens` only in the LLM advanced
+settings area as camelCase `maxOutputTokens` through Settings snapshot/patch DTOs.
+
+- Blank means no configured Provider cap; the backend retains the Recipe-owned budget.
+- A present value must be an integer in `1..=65_536`; frontend validation improves feedback but the
+  backend remains authoritative.
+- The control does not estimate task size, probe a Provider or automatically change after failure.
+- Plan, Single, Batch, Composition and Character generation pages never expose token budgets,
+  transport retries, model switching or response-format fallback.
+- A saved value is configuration for future request snapshots. UI must not imply that it rewrites a
+  paused Graph, successful checkpoint, Run or Artifact.
+
 ### Pack-Driven Item Editor
 
 `src/pages/ModEditorPage.tsx` renders Item types and canonical fields exclusively from

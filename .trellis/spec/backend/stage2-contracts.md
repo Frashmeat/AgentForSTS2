@@ -921,7 +921,16 @@ let candidates = service.prepare_default(
 
 ## 6. Prompt And Model
 
-Pinned Feature Recipe + verified Pack contribution + exact StoredItemDefinition + bounded Truth Evidence + selected Resource identities + sanitized project context + one runtime custom-instruction slot + typed output contract produce `ModelRequestSnapshot` v1.
+Pinned Feature Recipe + verified Pack contribution + exact StoredItemDefinition + bounded Truth Evidence + selected Resource identities + sanitized project context + one runtime custom-instruction slot + typed output contract + validated provider-neutral request limits produce `ModelRequestSnapshot` v1.
+
+Recipe `maxOutputTokens` is the Feature-owned business upper bound. Optional Settings
+`llm.max_output_tokens` is the user-declared maximum accepted by the configured model/proxy. Before
+snapshot creation, Feature request assembly resolves
+`min(recipe.maxOutputTokens, configured llm.max_output_tokens)`; when absent, the Recipe value is
+unchanged. The effective value is part of the snapshot request and its SHA-256, and the Runtime
+request plus provider-native HTTP body must carry that exact value. Adapters cannot silently cap it
+after hashing. Settings changes do not rewrite existing graph/checkpoint identities or alter a
+pinned Resume request.
 
 Runtime owns provider-neutral `ModelClient`; Adapters own HTTP. Long Mod/game Prompt strings are forbidden in handler/Shell/Adapter code. Protocol roles, schema/slot IDs, JSON contracts, escaping, truncation and redaction remain code contracts.
 
@@ -950,8 +959,9 @@ merge shapes cannot remain hidden post-provider constraints.
 exact `StoredItemDefinition`. The service validates its hash, Ready mode, Plan identity and all
 role-keyed `resourceBindings` before model work. The Recipe owns one required `item.definition`
 slot. Artifact extension schema v2 and dedicated provenance both record `definitionHash`.
-The Recipe treats ItemDefinition as authoritative over Plan prose and permits up to 16,384 output
-tokens for complete multi-file Items. Invalid or truncated output persists only
+The Recipe treats ItemDefinition as authoritative over Plan prose and permits a business upper bound
+of 16,384 output tokens for complete multi-file Items. The effective Provider request may be lower
+only through the explicit request-limit contract above. Invalid or truncated output persists only
 `feature.mod-generate-single-failure-details` v2 with one closed `reasonCode`; raw completion,
 parser text, Provider body and model-authored role text are never persisted.
 

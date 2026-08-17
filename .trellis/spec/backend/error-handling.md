@@ -46,6 +46,20 @@ provider or output failure never changes that value for the in-flight Run and ne
 second weaker-format request. Both modes retain the same Feature-owned typed decode; invalid JSON
 or shape remains `model.output_invalid` without raw Provider content in persisted details.
 
+The optional `llm.max_output_tokens` value is a user-declared Provider upper bound. Feature request
+assembly resolves `min(recipe.max_output_tokens, configured max)` before creating
+`ModelRequestSnapshot`; the effective value must therefore match the snapshot hash and actual HTTP
+body. Missing configuration preserves the Recipe value. Invalid configured bounds fail as
+`model.configuration` before queue or HTTP work. A rejection never causes automatic probing,
+budget reduction, model/endpoint/format switching or file splitting. If the effective budget cannot
+hold the typed result, the existing `model.output_truncated` failure remains authoritative.
+
+HTTP 401 maps to `ModelError::Authentication` and `model.authentication`. HTTP 403 maps to
+`ModelError::Rejected` and `model.request_rejected` unless a future Provider contract supplies
+trusted, explicit, structured invalid-key evidence. Status code, free-form response text and
+Provider/model identity are not sufficient to reinterpret 403 as authentication. The rejected body
+remains excluded from persisted details and logs.
+
 OpenAI-compatible Chat Completions are consumed as SSE even when the Feature calls `complete()`;
 the Adapter aggregates the stream into the existing `ModelResponse` contract. The 180-second
 transport budget applies independently to response headers and each interval between byte chunks,
