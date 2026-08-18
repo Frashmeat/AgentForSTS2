@@ -6,7 +6,7 @@
 >
 > 权威规则：协作与文档治理以仓库根目录 `PROJECT_SPEC.md` 为准。
 >
-> 最后更新：2026-08-17
+> 最后更新：2026-08-18
 
 ## 1. 阅读顺序
 
@@ -26,7 +26,7 @@
 | [`Prompt / 文本资源总览`](./01-总览/Prompt-文本资源总览.md) | Recipe、Pack guidance、Truth 和模型请求的装配边界 | Provider 单次故障流水 |
 | [`当前进度说明`](./02-现状/当前进度说明.md) | 当前代码能力、精确 catalog/hash、机器证据和剩余门禁 | 详细实现协议 |
 | [`当前方案`](./03-当前方案/当前方案.md) | 当前阶段目标、范围、约束、顺序和完成条件 | 历史候选账本 |
-| [`模型输出预算显式配置方案`](./03-当前方案/2026-08-17-模型输出预算显式配置方案.md) | Recipe 业务上限、Provider 配置上限、snapshot/hash 和错误分类 | 自动能力探测或模型切换 |
+| [`Typed Behavior IR 与 Game Pack 确定性生成架构`](./03-当前方案/Typed-Behavior-IR与Game-Pack确定性生成架构方案.md) | AI 语义 IR、确定性 Game Adapter、诊断路由、请求预算和破坏性 cutover | 当前已实现能力 |
 | [`通用执行内核、Game Pipeline Provider 与 Game Pack 边界`](./03-当前方案/通用Mod流水线与Game-Pack边界.md) | 不同游戏如何复用可靠性内核并保留各自生成/构建链路 | 当前已经实现的 Provider 代码合同 |
 
 ## 3. 稳定合同
@@ -47,7 +47,7 @@
 
 | 文档 | 定位 |
 | --- | --- |
-| [`通用执行内核、Game Pipeline Provider 与 Game Pack 边界`](./03-当前方案/通用Mod流水线与Game-Pack边界.md) | Core、Pipeline Provider、Game Adapter 与 Pack 的长期边界；Provider foundation 与机器门禁已完成，当前 candidate 已安装，等待 fresh closure 和真实游戏验收 |
+| [`通用执行内核、Game Pipeline Provider 与 Game Pack 边界`](./03-当前方案/通用Mod流水线与Game-Pack边界.md) | Core、Pipeline Provider、Game Adapter 与 Pack 的长期边界；Provider foundation 已完成，当前进入 Typed Behavior IR 与确定性 Adapter 改造 |
 
 已完成的阶段方案已移入归档：
 
@@ -59,6 +59,7 @@
 | [`可恢复分阶段 Mod 生成`](./90-归档/已完成基线/2026-08-10-可恢复分阶段Mod生成架构方案.md) | ExecutionGraph、checkpoint、claim、resume 和 commit protocol 的已完成设计 |
 | [`统一生成反馈闭环`](./90-归档/已完成基线/2026-08-12-统一生成反馈闭环架构方案.md) | strict output、typed diagnosis、semantic feedback 和安全停止语义的已完成设计 |
 | [`批次生成自动修复与单项调整`](./90-归档/已完成基线/2026-08-13-批次生成自动修复与单项调整架构方案.md) | 多 Item 自动技术修复和生成后单 Item 调整的已完成设计 |
+| [`模型输出预算显式配置方案`](./90-归档/已完成基线/2026-08-17-模型输出预算显式配置方案.md) | Recipe/Provider 输出上限、Graph-pinned limits 和 401/403 分类的已完成设计 |
 
 其中的日期、候选和状态只代表对应阶段；发生冲突时，以当前入口、stable spec 和代码为准。
 
