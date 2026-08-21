@@ -4,14 +4,14 @@ use std::fmt::Write as _;
 use ats_game_context::{
     BehaviorAdapterError, BehaviorAdapterIdentity, BehaviorItemContext, BehaviorProposal,
     BehaviorRenderContext, CapabilityInvocation, CapabilityValue, GameBehaviorAdapter,
-    RenderedFile, RenderedItemBundle,
+    RenderedFile, RenderedFileMerge, RenderedFileMergeKeyPolicy, RenderedItemBundle,
 };
 use ats_kernel::{BehaviorAdapterId, LocalizationFieldId, SchemaVersion, Sha256Digest};
 use sha2::{Digest, Sha256};
 
 pub const BEHAVIOR_ADAPTER_ID: &str = "game.sts2.behavior";
 pub const BEHAVIOR_ADAPTER_IMPLEMENTATION_SHA256: &str =
-    "ca4b74a6ce52e03c7ca5751be5742c26bc181f22cf827b42f9d46ccb70f81ebb";
+    "d65f5f1472d4641547e08b04447850c99a61ba8c8497b8dfe8d1276000d75f52";
 
 const CARD_DEAL_DAMAGE: &str = "card.on_play.deal_damage";
 const CARD_GAIN_BLOCK: &str = "card.on_play.gain_block";
@@ -117,8 +117,8 @@ fn validate_character(
     require_reference_types(&context.item, "cards", "card")?;
     require_reference_types(&context.item, "starting_relics", "relic")?;
     require_reference_types(&context.item, "relics", "relic")?;
-    require_reference_types(&context.item, "potions", "potion")?;
-    require_reference_types(&context.item, "powers", "power")?;
+    require_optional_reference_types(&context.item, "potions", "potion")?;
+    require_optional_reference_types(&context.item, "powers", "power")?;
     if choice(&context.item, "visual_profile")? == "branded_placeholder" {
         require_paths(
             &context.item,
@@ -601,22 +601,31 @@ fn localization_files(
         let mut values = BTreeMap::new();
         for field in fields {
             let value = localization_value(localization, field)?;
-            let suffix = localization_suffix(field);
+            let suffix = localization_suffix(table, field);
             values.insert(format!("{model_key}.{suffix}"), value.to_owned());
             if table == "cards" && *field == "description" {
                 values.insert(format!("{model_key}.upgrade_description"), value.to_owned());
             }
+            if table == "relics" && *field == "description" {
+                values.insert(format!("{model_key}.flavor"), value.to_owned());
+            }
         }
-        files.push(RenderedFile::new(
-            format!("localization.{}", locale.as_str()),
-            format!(
-                "{}/localization/{}/{}.json",
-                context.mod_id,
-                locale.as_str(),
-                table
+        files.push(
+            RenderedFile::new(
+                format!("localization.{}", locale.as_str()),
+                format!(
+                    "{}/localization/{}/{}.json",
+                    context.mod_id,
+                    locale.as_str(),
+                    table
+                ),
+                serde_json::to_vec(&values).map_err(|_| BehaviorAdapterError::InvalidOutput)?,
+            )?
+            .with_composition_merge(
+                RenderedFileMerge::JsonObject,
+                RenderedFileMergeKeyPolicy::UniqueKeys,
             ),
-            serde_json::to_vec(&values).map_err(|_| BehaviorAdapterError::InvalidOutput)?,
-        )?);
+        );
     }
     Ok(files)
 }
@@ -629,25 +638,31 @@ fn character_ancients_files(
     for (locale, localization) in &context.item.localizations {
         let mut values = BTreeMap::new();
         for (field, suffix) in [
-            ("end_turn_ping_alive", "banter.alive.endTurnPing"),
-            ("end_turn_ping_dead", "banter.dead.endTurnPing"),
-            ("event_death_prevention", "eventDeathPrevention"),
-            ("gold_monologue", "goldMonologue"),
+            ("title", "0-0r.char"),
+            ("title_object", "0-0r.next"),
+            ("description", "0-1r.ancient"),
+            ("cards_modifier_description", "0-attack"),
         ] {
             values.insert(
                 format!("THE_ARCHITECT.talk.{model_key}.{suffix}"),
                 localization_value(localization, field)?.to_owned(),
             );
         }
-        files.push(RenderedFile::new(
-            format!("localization.ancients.{}", locale.as_str()),
-            format!(
-                "{}/localization/{}/ancients.json",
-                context.mod_id,
-                locale.as_str()
+        files.push(
+            RenderedFile::new(
+                format!("localization.ancients.{}", locale.as_str()),
+                format!(
+                    "{}/localization/{}/ancients.json",
+                    context.mod_id,
+                    locale.as_str()
+                ),
+                serde_json::to_vec(&values).map_err(|_| BehaviorAdapterError::InvalidOutput)?,
+            )?
+            .with_composition_merge(
+                RenderedFileMerge::JsonObject,
+                RenderedFileMergeKeyPolicy::ExclusivePath,
             ),
-            serde_json::to_vec(&values).map_err(|_| BehaviorAdapterError::InvalidOutput)?,
-        )?);
+        );
     }
     Ok(files)
 }
@@ -800,6 +815,28 @@ fn require_reference_types(
     Ok(())
 }
 
+fn require_optional_reference_types(
+    item: &BehaviorItemContext,
+    slot: &str,
+    item_type: &str,
+) -> Result<(), BehaviorAdapterError> {
+    let Some(references) = item
+        .references
+        .iter()
+        .find(|(slot_id, _)| slot_id.as_str() == slot)
+    else {
+        return Ok(());
+    };
+    if references
+        .1
+        .iter()
+        .any(|reference| reference.item_type.as_str() != item_type)
+    {
+        return Err(BehaviorAdapterError::InvalidContext);
+    }
+    Ok(())
+}
+
 fn require_single_reference<'a>(
     item: &'a BehaviorItemContext,
     slot: &str,
@@ -903,17 +940,13 @@ fn pascal(value: &str) -> String {
 
 fn upper_snake(value: &str) -> String {
     let mut result = String::new();
+    let mut previous_was_lowercase = false;
     for (index, character) in value.chars().enumerate() {
-        if character.is_ascii_uppercase()
-            && index > 0
-            && result
-                .chars()
-                .last()
-                .is_some_and(|last| last.is_ascii_lowercase())
-        {
+        if character.is_ascii_uppercase() && index > 0 && previous_was_lowercase {
             result.push('_');
         }
         result.push(character.to_ascii_uppercase());
+        previous_was_lowercase = character.is_ascii_lowercase();
     }
     result
 }
@@ -934,7 +967,13 @@ fn target_type(value: &str) -> Result<&'static str, BehaviorAdapterError> {
     }
 }
 
-fn localization_suffix(value: &str) -> String {
+fn localization_suffix(table: &str, value: &str) -> String {
+    match (table, value) {
+        ("characters", "end_turn_ping_alive") => return "banter.alive.endTurnPing".into(),
+        ("characters", "end_turn_ping_dead") => return "banter.dead.endTurnPing".into(),
+        (_, "name") => return "title".into(),
+        _ => {}
+    }
     let mut result = String::new();
     let mut uppercase = false;
     for character in value.chars() {

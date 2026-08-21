@@ -20,6 +20,19 @@ const MAX_INVOCATIONS: usize = 128;
 const MAX_RENDERED_FILES: usize = 64;
 const MAX_RENDERED_FILE_BYTES: usize = 2 * 1024 * 1024;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum RenderedFileMerge {
+    JsonObject,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum RenderedFileMergeKeyPolicy {
+    UniqueKeys,
+    ExclusivePath,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BehaviorAdapterIdentity {
@@ -412,6 +425,10 @@ pub struct RenderedFile {
     pub relative_path: String,
     pub bytes: Vec<u8>,
     pub sha256: Sha256Digest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composition_merge: Option<RenderedFileMerge>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composition_merge_key_policy: Option<RenderedFileMergeKeyPolicy>,
 }
 
 impl RenderedFile {
@@ -435,7 +452,20 @@ impl RenderedFile {
             relative_path,
             bytes,
             sha256,
+            composition_merge: None,
+            composition_merge_key_policy: None,
         })
+    }
+
+    #[must_use]
+    pub fn with_composition_merge(
+        mut self,
+        merge: RenderedFileMerge,
+        key_policy: RenderedFileMergeKeyPolicy,
+    ) -> Self {
+        self.composition_merge = Some(merge);
+        self.composition_merge_key_policy = Some(key_policy);
+        self
     }
 
     fn validate(&self) -> Result<(), BehaviorAdapterError> {
@@ -444,6 +474,7 @@ impl RenderedFile {
             || self.bytes.is_empty()
             || self.bytes.len() > MAX_RENDERED_FILE_BYTES
             || hash_bytes(&self.bytes)? != self.sha256
+            || self.composition_merge.is_some() != self.composition_merge_key_policy.is_some()
         {
             return Err(BehaviorAdapterError::InvalidOutput);
         }

@@ -18,7 +18,8 @@ pub use behavior::{
     BehaviorRenderContext, BehaviorResourceBinding, CAPABILITY_CATALOG_SCHEMA_VERSION,
     CapabilityCatalog, CapabilityCatalogIdentity, CapabilityInvocation, CapabilityParameterSpec,
     CapabilityParameterType, CapabilitySpec, CapabilityValue, GameBehaviorAdapter,
-    PackBehaviorContract, RENDERED_ITEM_BUNDLE_SCHEMA_VERSION, RenderedFile, RenderedItemBundle,
+    PackBehaviorContract, RENDERED_ITEM_BUNDLE_SCHEMA_VERSION, RenderedFile, RenderedFileMerge,
+    RenderedFileMergeKeyPolicy, RenderedItemBundle,
 };
 pub use contribution::{
     ContributionRequirement, ContributionResolver, ContributionResolverError,

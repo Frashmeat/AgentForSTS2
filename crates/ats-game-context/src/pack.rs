@@ -12,7 +12,7 @@ use crate::{
 
 pub const GAME_PACK_SCHEMA_VERSION: u32 = 5;
 pub(crate) const BUILT_IN_STS2_SHA256: &str =
-    "8e2334db4b3ba1fee369920ef20491adbfb8000a3e4dec5de980e5ee6a1678ac";
+    "937015d75cf41660f08edb7e38fdf9c4062184aa4c87734dbf3d95f4a91b3be6";
 const BUILT_IN_STS2: &[u8] = include_bytes!("../../../game_packs/sts2/stage2-game-pack.json");
 
 #[derive(Debug, Clone)]

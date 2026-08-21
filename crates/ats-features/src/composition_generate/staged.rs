@@ -1,7 +1,9 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use ats_game_context::{
     BehaviorAdapterIdentity, BehaviorProposal, CapabilityCatalogIdentity, PipelineCheckpointPolicy,
-    PipelineNodePhase, PipelineNodeScope, PipelineResolveRequest, PipelineWorkItem,
-    RenderedItemBundle, ResolvedPipelineGraph,
+    PipelineNodePhase, PipelineNodeScope, PipelineResolveRequest, PipelineWorkItem, RenderedFile,
+    RenderedFileMerge, RenderedFileMergeKeyPolicy, RenderedItemBundle, ResolvedPipelineGraph,
 };
 use ats_kernel::{ExecutionNodeId, GamePackId, ItemId};
 use ats_runtime::{
@@ -1845,9 +1847,7 @@ fn restore_rendered_assembly<R: RunRepository + ?Sized>(
         .map(|(_, primitive)| primitive)
         .ok_or(CompositionGenerateError::ValidationPrimitiveMismatch)?;
     let mut provenance = Vec::with_capacity(blueprint.items.len());
-    let mut writes = Vec::new();
-    let mut artifact_files = Vec::new();
-    let mut paths = BTreeSet::new();
+    let mut assembled_files = BTreeMap::new();
     let mut item_results = Vec::with_capacity(blueprint.items.len());
 
     for (item, definition) in blueprint.items.iter().zip(&resolved.nodes) {
@@ -1856,19 +1856,7 @@ fn restore_rendered_assembly<R: RunRepository + ?Sized>(
         let behavior = decode_behavior_checkpoint(graph, item, definition, context)?;
         let render = decode_render_checkpoint(graph, item, definition, &behavior, context)?;
         for file in &render.bundle.files {
-            if !paths.insert(file.relative_path.clone()) {
-                return Err(CompositionGenerateError::RenderedFileConflict);
-            }
-            writes.push(ProjectFileWrite::new(
-                file.relative_path.clone(),
-                file.bytes.clone(),
-            )?);
-            artifact_files.push(ProposedArtifactFile {
-                role: file.role.clone(),
-                relative_path: file.relative_path.clone(),
-                composition_merge: None,
-                composition_merge_key_policy: None,
-            });
+            merge_rendered_file(&mut assembled_files, file)?;
         }
         provenance.push(CompositionBehaviorProvenance {
             item_id: definition.definition.item_id.clone(),
@@ -1896,6 +1884,20 @@ fn restore_rendered_assembly<R: RunRepository + ?Sized>(
                 .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?,
         });
     }
+    let mut writes = Vec::with_capacity(assembled_files.len());
+    let mut artifact_files = Vec::with_capacity(assembled_files.len());
+    for file in assembled_files.values() {
+        writes.push(ProjectFileWrite::new(
+            file.relative_path.clone(),
+            file.bytes.clone(),
+        )?);
+        artifact_files.push(ProposedArtifactFile {
+            role: file.role.clone(),
+            relative_path: file.relative_path.clone(),
+            composition_merge: None,
+            composition_merge_key_policy: None,
+        });
+    }
     ats_runtime::validate_project_writes(&writes)?;
     let finalize = StagedFinalizeCheckpoint {
         graph_digest: resolved.graph_digest.clone(),
@@ -1905,6 +1907,56 @@ fn restore_rendered_assembly<R: RunRepository + ?Sized>(
         items: item_results,
     };
     Ok((provenance, writes, artifact_files, finalize))
+}
+
+struct AssembledRenderedFile {
+    role: String,
+    relative_path: String,
+    bytes: Vec<u8>,
+    composition_merge: Option<RenderedFileMerge>,
+    composition_merge_key_policy: Option<RenderedFileMergeKeyPolicy>,
+}
+
+fn merge_rendered_file(
+    files: &mut BTreeMap<String, AssembledRenderedFile>,
+    file: &RenderedFile,
+) -> Result<(), CompositionGenerateError> {
+    let Some(existing) = files.get_mut(&file.relative_path) else {
+        files.insert(
+            file.relative_path.clone(),
+            AssembledRenderedFile {
+                role: file.role.clone(),
+                relative_path: file.relative_path.clone(),
+                bytes: file.bytes.clone(),
+                composition_merge: file.composition_merge,
+                composition_merge_key_policy: file.composition_merge_key_policy,
+            },
+        );
+        return Ok(());
+    };
+
+    if existing.role != file.role
+        || existing.composition_merge != Some(RenderedFileMerge::JsonObject)
+        || file.composition_merge != Some(RenderedFileMerge::JsonObject)
+        || existing.composition_merge_key_policy != file.composition_merge_key_policy
+        || file.composition_merge_key_policy != Some(RenderedFileMergeKeyPolicy::UniqueKeys)
+    {
+        return Err(CompositionGenerateError::RenderedFileConflict);
+    }
+
+    let mut merged =
+        serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&existing.bytes)
+            .map_err(|_| CompositionGenerateError::RenderedFileConflict)?;
+    let incoming =
+        serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&file.bytes)
+            .map_err(|_| CompositionGenerateError::RenderedFileConflict)?;
+    if incoming.keys().any(|key| merged.contains_key(key)) {
+        return Err(CompositionGenerateError::RenderedFileConflict);
+    }
+    merged.extend(incoming);
+    existing.bytes =
+        serde_json::to_vec(&merged).map_err(|_| CompositionGenerateError::RenderedFileConflict)?;
+    Ok(())
 }
 
 fn decode_behavior_checkpoint(

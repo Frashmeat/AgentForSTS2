@@ -53,11 +53,7 @@ impl RunRepository for FileRunRepository {
         let mut summaries = Vec::new();
         for entry in fs::read_dir(&self.root).map_err(RunRepositoryError::Io)? {
             let entry = entry.map_err(RunRepositoryError::Io)?;
-            if entry
-                .path()
-                .extension()
-                .is_some_and(|extension| extension == "json")
-            {
+            if is_run_file(&entry.path()) {
                 summaries.push(RunSummary::from(&read(&entry.path())?));
             }
         }
@@ -89,11 +85,7 @@ impl RunRepository for FileRunRepository {
         let mut count = 0_u32;
         for entry in fs::read_dir(&self.root).map_err(RunRepositoryError::Io)? {
             let entry = entry.map_err(RunRepositoryError::Io)?;
-            if entry
-                .path()
-                .extension()
-                .is_none_or(|extension| extension != "json")
-            {
+            if !is_run_file(&entry.path()) {
                 continue;
             }
             let mut run = read(&entry.path())?;
@@ -130,6 +122,14 @@ fn read(path: &Path) -> Result<RunRecord, RunRepositoryError> {
     }
     serde_json::from_slice(&fs::read(path).map_err(RunRepositoryError::Io)?)
         .map_err(RunRepositoryError::Json)
+}
+
+fn is_run_file(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("run-") && name.ends_with(".json"))
 }
 
 fn write_new(path: &Path, run: &RunRecord) -> Result<(), RunRepositoryError> {
@@ -204,5 +204,17 @@ mod tests {
             repository.get(record.id()).unwrap().status(),
             RunStatus::Failed
         );
+    }
+
+    #[test]
+    fn list_and_reconcile_ignore_non_run_json_metadata() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let repository = FileRunRepository::new(temp.path().to_path_buf()).unwrap();
+        fs::write(temp.path().join("Mod.json"), b"{}").unwrap();
+        let record = run();
+        repository.create(&record).unwrap();
+
+        assert_eq!(repository.list().unwrap().len(), 1);
+        assert_eq!(repository.reconcile_interrupted().unwrap(), 1);
     }
 }

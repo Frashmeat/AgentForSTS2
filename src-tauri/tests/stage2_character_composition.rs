@@ -494,7 +494,7 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
     assert_eq!(run.status(), RunStatus::Succeeded);
     assert_eq!(execution.result.node_count, 11);
     let child_runs = runs.list().unwrap();
-    assert_eq!(child_runs.len(), 24);
+    assert_eq!(child_runs.len(), 13);
     assert!(
         child_runs
             .iter()
@@ -536,7 +536,7 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
         &fs::read(project.join(format!("{MOD_ID}/localization/eng/cards.json"))).unwrap(),
     )
     .unwrap();
-    assert_eq!(cards.len(), 18);
+    assert_eq!(cards.len(), 27);
     let characters: BTreeMap<String, Value> = serde_json::from_slice(
         &fs::read(project.join(format!("{MOD_ID}/localization/eng/characters.json"))).unwrap(),
     )
@@ -1140,187 +1140,28 @@ fn plan_response(item_id: &str, item_type: &str) -> String {
     .to_string()
 }
 
-fn bundle_response(item_id: &str, item_type: &str) -> String {
-    let files = match item_type {
-        "character" => json!({
-            "source": character_source(),
-            "localization.eng": localization_object("PROTOTYPE_CHARACTER", character_loc_entries("Prototype")),
-            "localization.zhs": localization_object("PROTOTYPE_CHARACTER", character_loc_entries("Prototype ZHS")),
-            "localization.ancients.eng": architect_localization_object("Prototype"),
-            "localization.ancients.zhs": architect_localization_object("Prototype ZHS")
-        }),
-        "relic" => json!({
-            "source": relic_source(),
-            "localization.eng": localization_object("PROTOTYPE_RELIC", vec![("title","Prototype Relic"),("description","A deterministic starter Relic."),("flavor","Built for a deterministic gate.")]),
-            "localization.zhs": localization_object("PROTOTYPE_RELIC", vec![("title","Prototype Relic ZHS"),("description","A deterministic starter Relic ZHS."),("flavor","Built for a deterministic gate ZHS.")])
-        }),
+fn bundle_response(_item_id: &str, item_type: &str) -> String {
+    let invocations = match item_type {
+        "character" => json!([]),
         "card" => {
-            let index = item_id.rsplit('-').next().unwrap().parse::<u32>().unwrap();
-            let key = format!("PROTOTYPE_CARD{index:02}");
-            json!({
-                "source": card_source(index),
-                "localization.eng": localization_object(&key, vec![("title",&format!("Prototype Card {index}")),("description","A deterministic prototype card.")]),
-                "localization.zhs": localization_object(&key, vec![("title",&format!("Prototype Card {index} ZHS")),("description","A deterministic prototype card ZHS.")])
-            })
+            let index = _item_id.rsplit('-').next().unwrap().parse::<u32>().unwrap();
+            let capability = if index.is_multiple_of(2) {
+                "card.on_play.gain_block"
+            } else {
+                "card.on_play.deal_damage"
+            };
+            json!([{
+                "capabilityId": capability,
+                "arguments": {"amount": {"kind": "integer", "value": 6}}
+            }])
         }
+        "relic" => json!([{
+            "capabilityId": "relic.combat_start.gain_block",
+            "arguments": {"amount": {"kind": "integer", "value": 8}}
+        }]),
         _ => unreachable!(),
     };
-    json!({"files":files,"acceptanceNotes":["Generated for the Prototype closure."]}).to_string()
-}
-
-fn localization_object(prefix: &str, entries: Vec<(&str, &str)>) -> Value {
-    Value::Object(
-        entries
-            .into_iter()
-            .map(|(key, value)| {
-                (
-                    format!("{}-{prefix}.{key}", MOD_ID.to_ascii_uppercase()),
-                    Value::String(value.into()),
-                )
-            })
-            .collect(),
-    )
-}
-
-fn character_loc_entries(title: &str) -> Vec<(&'static str, &str)> {
-    vec![
-        ("title", title),
-        ("titleObject", title),
-        ("description", "A deterministic placeholder Character."),
-        ("pronounObject", "them"),
-        ("pronounSubject", "they"),
-        ("pronounPossessive", "theirs"),
-        ("possessiveAdjective", "their"),
-        ("aromaPrinciple", "A steady arcane aroma."),
-        ("banter.alive.endTurnPing", "Ready."),
-        ("banter.dead.endTurnPing", "..."),
-        ("eventDeathPrevention", "Not yet."),
-        ("goldMonologue", "Resources secured."),
-        ("cardsModifierTitle", "Prototype cards"),
-        ("cardsModifierDescription", "Cards owned by the Prototype."),
-    ]
-}
-
-fn architect_localization_object(character: &str) -> Value {
-    Value::Object(
-        [
-            (
-                "THE_ARCHITECT.talk.PROTOTYPECHARACTERGATE-PROTOTYPE_CHARACTER.0-0r.char",
-                character,
-            ),
-            (
-                "THE_ARCHITECT.talk.PROTOTYPECHARACTERGATE-PROTOTYPE_CHARACTER.0-0r.next",
-                "Continue",
-            ),
-            (
-                "THE_ARCHITECT.talk.PROTOTYPECHARACTERGATE-PROTOTYPE_CHARACTER.0-1r.ancient",
-                "The Architect answers.",
-            ),
-            (
-                "THE_ARCHITECT.talk.PROTOTYPECHARACTERGATE-PROTOTYPE_CHARACTER.0-attack",
-                "Both",
-            ),
-        ]
-        .into_iter()
-        .map(|(key, value)| (key.to_owned(), Value::String(value.into())))
-        .collect(),
-    )
-}
-
-fn character_source() -> &'static str {
-    r#"using BaseLib.Abstracts;
-using Godot;
-using MegaCrit.Sts2.Core.Entities.Characters;
-using MegaCrit.Sts2.Core.Models;
-
-namespace PrototypeCharacterGate;
-
-public sealed class PrototypeCardPool : CustomCardPoolModel
-{
-    public override string Title => "prototype";
-    public override bool IsColorless => false;
-    public override Color ShaderColor => new("7D3FC8FF");
-    public override Color DeckEntryCardColor => new("7D3FC8FF");
-}
-
-public sealed class PrototypeRelicPool : CustomRelicPoolModel { }
-
-public sealed class PrototypePotionPool : CustomPotionPoolModel { }
-
-public sealed class PrototypeCharacter : PlaceholderCharacterModel
-{
-    public override string PlaceholderID => "ironclad";
-    public override string? CustomIconTexturePath => "PrototypeCharacterGate/images/characters/prototype-character/top_panel.png";
-    public override string? CustomIconPath => "PrototypeCharacterGate/images/characters/prototype-character/top_panel_outline.png";
-    public override string? CustomCharacterSelectIconPath => "PrototypeCharacterGate/images/characters/prototype-character/select.png";
-    public override string? CustomCharacterSelectLockedIconPath => "PrototypeCharacterGate/images/characters/prototype-character/select_locked.png";
-    public override string? CustomMapMarkerPath => "PrototypeCharacterGate/images/characters/prototype-character/map_marker.png";
-    public override Color NameColor => new("7D3FC8FF");
-    public override CharacterGender Gender => CharacterGender.Neutral;
-    public override int StartingHp => 70;
-    public override int StartingGold => 99;
-    public override int MaxEnergy => 3;
-    public override CardPoolModel CardPool => ModelDb.CardPool<PrototypeCardPool>();
-    public override RelicPoolModel RelicPool => ModelDb.RelicPool<PrototypeRelicPool>();
-    public override PotionPoolModel PotionPool => ModelDb.PotionPool<PrototypePotionPool>();
-    public override IEnumerable<CardModel> StartingDeck =>
-    [
-        ModelDb.Card<PrototypeCard01>(), ModelDb.Card<PrototypeCard01>(),
-        ModelDb.Card<PrototypeCard01>(), ModelDb.Card<PrototypeCard01>(),
-        ModelDb.Card<PrototypeCard02>(), ModelDb.Card<PrototypeCard02>(),
-        ModelDb.Card<PrototypeCard02>(), ModelDb.Card<PrototypeCard03>(),
-        ModelDb.Card<PrototypeCard03>(), ModelDb.Card<PrototypeCard03>()
-    ];
-    public override IReadOnlyList<RelicModel> StartingRelics =>
-        [ModelDb.Relic<PrototypeRelic>()];
-}"#
-}
-
-fn card_source(index: u32) -> String {
-    let card_type = if index.is_multiple_of(2) {
-        "CardType.Skill"
-    } else {
-        "CardType.Attack"
-    };
-    let target = if index.is_multiple_of(2) {
-        "TargetType.Self"
-    } else {
-        "TargetType.AnyEnemy"
-    };
-    let rarity = match index {
-        1..=3 => "CardRarity.Basic",
-        4..=6 => "CardRarity.Common",
-        7..=8 => "CardRarity.Uncommon",
-        _ => "CardRarity.Rare",
-    };
-    format!(
-        r#"using BaseLib.Abstracts;
-using BaseLib.Utils;
-using MegaCrit.Sts2.Core.Entities.Cards;
-using MegaCrit.Sts2.Core.GameActions.Multiplayer;
-
-namespace PrototypeCharacterGate;
-
-[Pool(typeof(PrototypeCardPool))]
-public sealed class PrototypeCard{index:02}() : CustomCardModel(1, {card_type}, {rarity}, {target})
-{{
-    protected override Task OnPlay(PlayerChoiceContext choiceContext, CardPlay cardPlay) => Task.CompletedTask;
-}}"#
-    )
-}
-
-fn relic_source() -> &'static str {
-    r#"using BaseLib.Abstracts;
-using BaseLib.Utils;
-using MegaCrit.Sts2.Core.Entities.Relics;
-
-namespace PrototypeCharacterGate;
-
-[Pool(typeof(PrototypeRelicPool))]
-public sealed class PrototypeRelic : CustomRelicModel
-{
-    public override RelicRarity Rarity => RelicRarity.Starter;
-}"#
+    json!({"invocations":invocations}).to_string()
 }
 
 fn truth(pack: &LoadedGamePack) -> VerifiedTruthSnapshot {

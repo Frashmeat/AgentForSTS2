@@ -6,7 +6,7 @@
     "adapter": {
       "id": "game.sts2.behavior",
       "version": 1,
-      "implementationSha256": "ca4b74a6ce52e03c7ca5751be5742c26bc181f22cf827b42f9d46ccb70f81ebb"
+      "implementationSha256": "d65f5f1472d4641547e08b04447850c99a61ba8c8497b8dfe8d1276000d75f52"
     },
     "catalog": {
       "schemaVersion": 1,
@@ -15,7 +15,7 @@
       "adapter": {
         "id": "game.sts2.behavior",
         "version": 1,
-        "implementationSha256": "ca4b74a6ce52e03c7ca5751be5742c26bc181f22cf827b42f9d46ccb70f81ebb"
+        "implementationSha256": "d65f5f1472d4641547e08b04447850c99a61ba8c8497b8dfe8d1276000d75f52"
       },
       "capabilities": [
         {
