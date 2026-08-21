@@ -28,7 +28,7 @@ impl FileExecutionGraphRepository {
     }
 
     fn root(&self) -> PathBuf {
-        self.project_root.join(".ats").join("execution-graphs-v4")
+        self.project_root.join(".ats").join("execution-graphs-v5")
     }
 
     fn path(&self, id: &ExecutionGraphId) -> PathBuf {
@@ -345,8 +345,8 @@ mod tests {
         let graph = graph(run.id().clone());
         repository.create_claimed(&graph, run.id()).unwrap();
         assert_eq!(repository.get(graph.id()).unwrap(), graph);
-        assert!(temp.path().join(".ats/execution-graphs-v4").is_dir());
-        assert!(!temp.path().join(".ats/execution-graphs-v3").exists());
+        assert!(temp.path().join(".ats/execution-graphs-v5").is_dir());
+        assert!(!temp.path().join(".ats/execution-graphs-v4").exists());
 
         let report = repository.recover_structure(&runs).unwrap();
         assert_eq!(report.recovered, 1);

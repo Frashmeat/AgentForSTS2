@@ -1,12 +1,12 @@
 # Typed Behavior IR 与 Game Pack 确定性生成架构方案
 
-> 文档定位：定义 AI 语义生成、通用执行内核、Game Pack 能力声明和游戏专属确定性适配之间的目标合同。
+> 文档定位：定义并记录 AI 语义生成、通用执行内核、Game Pack 能力声明和游戏专属确定性适配之间的已实施合同。
 >
 > 事实依据：`rc-20260817T093831Z-b7d8e698ace8` 安装态 Composition E2E 中，35/35 生成节点成功，但 17 个原生文件都进入编译修复，Repair Campaign 在 11/17 时因 Graph 总语义请求达到 20 而暂停。
 >
 > 权威入口：[`current plan`](./当前方案.md) 和 Trellis 任务 `08-18-typed-behavior-ir-game-pack-adapter`。
 >
-> 最后更新：2026-08-18
+> 最后更新：2026-08-21
 
 ## 1. 决议摘要
 
@@ -23,6 +23,10 @@ Game Pipeline Provider -> 游戏专属 Validate / Build / Package / Publish
 ```
 
 禁止保留“新 IR 失败时回退到旧的 AI 直接 C#/JSON 生成”兼容路径。旧 Graph、Run、Artifact 和 candidate 仅保留为历史证据。
+
+当前工作区已经实现 Pack v5、ExecutionGraph v5、Behavior/Render checkpoints、STS2 五类 Adapter、
+baseline/shared feedback accounting 和 Behavior-scoped 单 Item adjustment。实现已通过定点门禁，
+但尚未通过完整机器门禁或 fresh candidate 验收，因此本文保持当前方案身份而不归档。
 
 ## 2. Scope / Trigger
 
@@ -74,31 +78,36 @@ flowchart LR
 以下为目标概念合同；实现时必须在 Runtime/Feature/Game Context 中形成等价的 versioned typed payload：
 
 ```rust
-struct BehaviorProposalV1 {
+struct BehaviorProposal {
+    schema_version: u32,
     item_id: ItemId,
     item_type: ItemTypeId,
-    capabilities: Vec<CapabilityInvocationV1>,
+    definition_hash: Sha256Digest,
+    catalog: CapabilityCatalogIdentity,
+    adapter: BehaviorAdapterIdentity,
+    invocations: Vec<CapabilityInvocation>,
 }
 
-struct CapabilityInvocationV1 {
-    capability_id: CapabilityId,
-    arguments: BTreeMap<ArgumentId, CapabilityValue>,
-    references: BTreeMap<ReferenceSlotId, ItemReference>,
+struct CapabilityInvocation {
+    capability_id: BehaviorCapabilityId,
+    arguments: BTreeMap<CapabilityParameterId, CapabilityValue>,
 }
 
-struct CapabilityCatalogV1 {
-    catalog_id: CapabilityCatalogId,
+struct CapabilityCatalog {
+    schema_version: u32,
+    id: CapabilityCatalogId,
     version: u32,
-    sha256: Sha256Digest,
-    item_types: BTreeMap<ItemTypeId, ItemCapabilitySet>,
+    adapter: BehaviorAdapterIdentity,
+    capabilities: Vec<CapabilitySpec>,
+    item_types: Vec<BehaviorCapabilitySet>,
 }
 
 trait GameBehaviorAdapter {
     fn identity(&self) -> AdapterIdentity;
-    fn validate_ir(&self, context: &PinnedGameContext, ir: &BehaviorProposalV1)
-        -> Result<(), Vec<BehaviorIssue>>;
-    fn render(&self, context: &PinnedGameContext, ir: &BehaviorProposalV1)
-        -> Result<RenderedItemBundle, AdapterFailure>;
+    fn validate_ir(&self, context: &BehaviorRenderContext, ir: &BehaviorProposal)
+        -> Result<(), BehaviorAdapterError>;
+    fn render(&self, context: &BehaviorRenderContext, ir: &BehaviorProposal)
+        -> Result<RenderedItemBundle, BehaviorAdapterError>;
 }
 ```
 
@@ -106,13 +115,14 @@ trait GameBehaviorAdapter {
 
 ```text
 RenderedItemBundle
-+-- behaviorIrSha256
++-- behaviorSha256
 +-- adapterId / version / sha256
-+-- packId / packSha256
-+-- truthSnapshotId / sha256
 +-- definitionHash
-+-- files[] { roleId, relativePath, bytesSha256 }
++-- files[] { role, relativePath, bytes, sha256 }
 ```
+
+Pack、Truth、Catalog 和 ModelRequestSnapshot identity 由 Behavior/Render checkpoint provenance
+额外绑定，不伪装成 `RenderedItemBundle` 自身字段。
 
 ## 5. 所有权合同
 
@@ -239,15 +249,15 @@ Adapter compile error -> local typed defect
 only IR diagnosis -> item-local semantic revision
 ```
 
-## 13. 破坏性迁移
+## 13. 已执行的破坏性迁移
 
-1. 新建 versioned Behavior IR 和 Capability Catalog，不修改旧 generated-file payload 定义伪装兼容。
-2. 提升 Pack/Blueprint/ExecutionGraph/Checkpoint 内部 schema；仅读新目录，旧目录原样保留证据。
-3. 将 localization/resource/reference/path 从 Model output contract 移出，改为确定性 renderer。
-4. 实现 STS2 的 Character/Card/Relic/Potion/Power Adapter 和 contract fixtures。
-5. 将 Composition Generate 切换到 Behavior/Render Graph，删除生产路径上的原生文件 Model output。
-6. 重写用户单 Item 调整：调整词只作用于 BehaviorProposal，随后确定性重渲染并复验闭包。
-7. 更新 stable specs 后运行机器门禁，再取得独立授权构建新 candidate。
+1. 已新增 versioned Behavior IR 和 Capability Catalog，没有修改旧 generated-file payload 伪装兼容。
+2. 已提升 Pack/Blueprint/ExecutionGraph/Checkpoint schema；仅读新目录，旧目录原样保留证据。
+3. 已将 localization/resource/reference/path 从 Composition Model output 移至确定性 renderer。
+4. 已实现 STS2 Character/Card/Relic/Potion/Power Adapter 和 contract fixtures。
+5. 已将 Composition Generate 切换到 Behavior/Render Graph，删除生产原生文件 Model output。
+6. 已将单 Item 调整收口为目标 BehaviorProposal 修订、确定性重渲染和 whole-closure 复验。
+7. 当前有效文档已同步；完整机器门禁和 fresh candidate 仍待独立授权。
 
 ## 14. Tests Required
 

@@ -915,9 +915,10 @@ mod tests {
 
     fn pack() -> LoadedGamePack {
         let value = serde_json::json!({
-            "schemaVersion": 4,
+            "schemaVersion": 5,
             "id": "fixture-game",
             "displayName": "Fixture Game",
+            "behavior": crate::behavior::fixture_behavior_json("ready_item"),
             "itemTypes": [
                 {
                     "id": "ready_item",

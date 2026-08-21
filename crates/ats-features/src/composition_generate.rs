@@ -1,7 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use ats_game_context::{
+    BehaviorAdapterIdentity, BehaviorAdapterRegistry, CapabilityCatalogIdentity,
     ContributionResolverError, GamePipelineRegistry, LoadedGamePack, PipelineRegistryError,
     PipelineSelection, VerifiedContributionSet, VerifiedTruthSnapshot,
 };
@@ -11,10 +12,10 @@ use ats_kernel::{
 };
 use ats_runtime::{
     ArtifactFileInput, ArtifactPublishRequest, ArtifactPublisher, BuildRunner, CancellationToken,
-    ModelClient, PackageWriter, PayloadError, ProjectFileWrite, ProjectFileWriter,
-    ProjectStageError, ProjectStageRequest, ProjectStager, ProjectWriteError, RunFailure, RunId,
-    RunLifecycleError, RunRecord, RunStatus, RunTransition, ValidationError, ValidationRequest,
-    ValidationRunner, VersionedPayload,
+    ModelClient, PackageWriter, PayloadError, ProjectFileWriter, ProjectStageError,
+    ProjectStageRequest, ProjectStager, ProjectWriteError, RunFailure, RunId, RunLifecycleError,
+    RunRecord, RunStatus, RunTransition, ValidationError, ValidationRequest, ValidationRunner,
+    VersionedPayload,
 };
 use ats_workspace::{ItemRepository, ResourceRepository, StoredItemDefinition};
 use chrono::Utc;
@@ -24,12 +25,7 @@ use thiserror::Error;
 
 use crate::FeatureSpec;
 use crate::composition::{CompositionDraftRef, CompositionGraphError, ResolvedItemGraph};
-use crate::mod_generate_single::{
-    CompositionFileMerge, CompositionMergeKeyPolicy, ProposedArtifactFile,
-    SingleGenerateCompositionProposal, SingleGenerateContext, SingleGenerateError,
-    SingleGenerateFeature, SingleGenerateRequest, SingleGenerateResult, SingleGenerateService,
-    SingleGenerationProvenance, SingleProposalDependencies,
-};
+use crate::mod_generate_single::ProposedArtifactFile;
 use crate::mod_plan::{
     ModPlanContext, ModPlanError, ModPlanFeature, ModPlanRequest, ModPlanService,
 };
@@ -42,6 +38,8 @@ use crate::project_package::{
     ProjectPackageResult, ProjectPackageService,
 };
 
+mod behavior;
+mod render;
 mod staged;
 pub use staged::{
     CompositionAdjustmentItem, StagedCompositionGenerateExecution, StagedCompositionGenerateStart,
@@ -64,11 +62,11 @@ impl FeatureSpec for CompositionGenerateFeature {
     }
 
     fn result_schema() -> SchemaRef {
-        schema_version("feature.composition-generate-result", 3)
+        schema_version("feature.composition-generate-result", 4)
     }
 
     fn artifact_extension_schema() -> SchemaRef {
-        schema_version("feature.composition-generate-artifact-extension", 3)
+        schema_version("feature.composition-generate-artifact-extension", 4)
     }
 }
 
@@ -197,8 +195,11 @@ pub struct CompositionItemRunResult {
     pub item_id: ats_kernel::ItemId,
     pub definition_hash: Sha256Digest,
     pub plan_run_id: RunId,
-    pub generation_run_id: RunId,
-    pub generation: SingleGenerateResult,
+    pub behavior_request_sha256: Sha256Digest,
+    pub behavior_sha256: Sha256Digest,
+    pub rendered_bundle_sha256: Sha256Digest,
+    pub adapter: BehaviorAdapterIdentity,
+    pub generated_file_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -253,14 +254,30 @@ struct CompositionGenerateContribution {
 #[serde(rename_all = "camelCase")]
 struct CompositionGenerationProvenance {
     graph_digest: Sha256Digest,
-    nodes: Vec<SingleGenerationProvenance>,
+    nodes: Vec<CompositionBehaviorProvenance>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CompositionBehaviorProvenance {
+    item_id: ats_kernel::ItemId,
+    definition_hash: Sha256Digest,
+    pack_id: ats_kernel::GamePackId,
+    pack_sha256: Sha256Digest,
+    truth_snapshot_id: Sha256Digest,
+    catalog: CapabilityCatalogIdentity,
+    adapter: BehaviorAdapterIdentity,
+    model_request_sha256: Sha256Digest,
+    behavior_sha256: Sha256Digest,
+    rendered_bundle_sha256: Sha256Digest,
+    model: String,
+    usage: ats_runtime::TokenUsage,
 }
 
 pub struct CompositionGenerateContext<'a> {
     pub pack: &'a LoadedGamePack,
     pub composition_contributions: &'a VerifiedContributionSet,
     pub plan_contributions: &'a VerifiedContributionSet,
-    pub single_contributions: &'a VerifiedContributionSet,
     pub resource_contributions: &'a VerifiedContributionSet,
     pub build_contributions: Option<&'a VerifiedContributionSet>,
     pub package_contributions: Option<&'a VerifiedContributionSet>,
@@ -293,11 +310,11 @@ where
     pub artifacts: &'a A,
     pub build_runner: &'a B,
     pub package_writer: &'a P,
+    pub behavior_adapters: &'a BehaviorAdapterRegistry,
 }
 
 pub struct CompositionGenerateService<'a> {
     plan: &'a ModPlanService,
-    single: &'a SingleGenerateService,
     build: &'a ProjectBuildService,
     package: &'a ProjectPackageService,
     pipelines: &'a GamePipelineRegistry,
@@ -307,14 +324,12 @@ impl<'a> CompositionGenerateService<'a> {
     #[must_use]
     pub fn new(
         plan: &'a ModPlanService,
-        single: &'a SingleGenerateService,
         build: &'a ProjectBuildService,
         package: &'a ProjectPackageService,
         pipelines: &'a GamePipelineRegistry,
     ) -> Self {
         Self {
             plan,
-            single,
             build,
             package,
             pipelines,
@@ -334,8 +349,8 @@ pub enum CompositionGenerateError {
     InvalidContribution,
     #[error("composition nodes do not share one validation Primitive")]
     ValidationPrimitiveMismatch,
-    #[error("composition generated files cannot be merged safely")]
-    GeneratedFileConflict,
+    #[error("composition rendered files contain a duplicate path")]
+    RenderedFileConflict,
     #[error("composition Artifact publication failed")]
     ArtifactPublication,
     #[error("composition Artifact cleanup failed")]
@@ -367,7 +382,9 @@ pub enum CompositionGenerateError {
     #[error(transparent)]
     Plan(#[from] ModPlanError),
     #[error(transparent)]
-    Single(#[from] SingleGenerateError),
+    Behavior(#[from] behavior::BehaviorGenerationError),
+    #[error(transparent)]
+    Render(#[from] render::BehaviorRenderError),
     #[error(transparent)]
     Stage(#[from] ProjectStageError),
     #[error(transparent)]
@@ -403,7 +420,7 @@ impl CompositionGenerateError {
                 "composition.generate.validation_mismatch",
                 "composition.generate.propose",
             ),
-            Self::GeneratedFileConflict => ("model.output_invalid", "composition.generate.merge"),
+            Self::RenderedFileConflict => ("game.adapter_invalid", "composition.render.files"),
             Self::ArtifactPublication => {
                 ("artifact.publish_failed", "composition.generate.publish")
             }
@@ -439,7 +456,8 @@ impl CompositionGenerateError {
             Self::Cancelled => ("run.cancelled", "composition.generate.execute"),
             Self::Graph(error) => (error.code(), "composition.generate.graph"),
             Self::Plan(error) => return error.run_failure(),
-            Self::Single(error) => return error.run_failure(),
+            Self::Behavior(error) => return error.run_failure(),
+            Self::Render(error) => return error.run_failure(),
             Self::Stage(ProjectStageError::InvalidSource | ProjectStageError::LimitExceeded) => (
                 "composition.staging.invalid",
                 "composition.generate.staging",
@@ -466,166 +484,12 @@ impl CompositionGenerateError {
     }
 }
 
-fn consolidate_proposed_files(
-    proposals: &[SingleGenerateCompositionProposal],
-) -> Result<(Vec<ProjectFileWrite>, Vec<ProposedArtifactFile>), CompositionGenerateError> {
-    struct PendingFile {
-        role: String,
-        merge: Option<CompositionFileMerge>,
-        merge_key_policy: Option<CompositionMergeKeyPolicy>,
-        contents: Vec<Vec<u8>>,
-    }
-
-    let mut pending = BTreeMap::<String, PendingFile>::new();
-    for proposal in proposals {
-        if proposal.writes.len() != proposal.artifact_files.len() {
-            return Err(CompositionGenerateError::GeneratedFileConflict);
-        }
-        for (write, file) in proposal.writes.iter().zip(&proposal.artifact_files) {
-            if write.relative_path() != file.relative_path || write.source_path().is_some() {
-                return Err(CompositionGenerateError::GeneratedFileConflict);
-            }
-            if file.composition_merge.is_some() != file.composition_merge_key_policy.is_some() {
-                return Err(CompositionGenerateError::GeneratedFileConflict);
-            }
-            let bytes = write
-                .bytes()
-                .ok_or(CompositionGenerateError::GeneratedFileConflict)?;
-            match pending.get_mut(write.relative_path()) {
-                Some(existing)
-                    if existing.role == file.role
-                        && existing.merge == Some(CompositionFileMerge::JsonObject)
-                        && existing.merge_key_policy
-                            == Some(CompositionMergeKeyPolicy::UniqueKeys)
-                        && file.composition_merge == existing.merge
-                        && file.composition_merge_key_policy == existing.merge_key_policy =>
-                {
-                    existing.contents.push(bytes.to_vec());
-                }
-                Some(_) => return Err(CompositionGenerateError::GeneratedFileConflict),
-                None => {
-                    pending.insert(
-                        write.relative_path().to_owned(),
-                        PendingFile {
-                            role: file.role.clone(),
-                            merge: file.composition_merge,
-                            merge_key_policy: file.composition_merge_key_policy,
-                            contents: vec![bytes.to_vec()],
-                        },
-                    );
-                }
-            }
-        }
-    }
-
-    let mut writes = Vec::with_capacity(pending.len());
-    let mut artifact_files = Vec::with_capacity(pending.len());
-    for (path, file) in pending {
-        let bytes = if file.merge == Some(CompositionFileMerge::JsonObject) {
-            merge_json_objects(&file.contents)?
-        } else if file.contents.len() == 1 {
-            file.contents.into_iter().next().unwrap_or_default()
-        } else {
-            return Err(CompositionGenerateError::GeneratedFileConflict);
-        };
-        writes.push(ProjectFileWrite::new(path.clone(), bytes)?);
-        artifact_files.push(ProposedArtifactFile {
-            role: file.role,
-            relative_path: path,
-            composition_merge: file.merge,
-            composition_merge_key_policy: file.merge_key_policy,
-        });
-    }
-    Ok((writes, artifact_files))
-}
-
-fn merge_json_objects(contents: &[Vec<u8>]) -> Result<Vec<u8>, CompositionGenerateError> {
-    let mut merged = BTreeMap::<String, serde_json::Value>::new();
-    for bytes in contents {
-        let values = serde_json::from_slice::<BTreeMap<String, serde_json::Value>>(bytes)
-            .map_err(|_| CompositionGenerateError::GeneratedFileConflict)?;
-        if values.values().any(|value| !value.is_string()) {
-            return Err(CompositionGenerateError::GeneratedFileConflict);
-        }
-        for (key, value) in values {
-            if merged.insert(key, value).is_some() {
-                return Err(CompositionGenerateError::GeneratedFileConflict);
-            }
-        }
-    }
-    serde_json::to_vec_pretty(&merged).map_err(|_| CompositionGenerateError::GeneratedFileConflict)
-}
-
-enum NextProposalMergeConflict {
-    DuplicateKey { role: String },
-    Contract,
-}
-
-fn validate_next_proposal_merge_claims(
-    previous: &[SingleGenerateCompositionProposal],
-    current: &SingleGenerateCompositionProposal,
-) -> Result<(), NextProposalMergeConflict> {
-    consolidate_proposed_files(std::slice::from_ref(current))
-        .map_err(|_| NextProposalMergeConflict::Contract)?;
-    let (existing_writes, existing_files) =
-        consolidate_proposed_files(previous).map_err(|_| NextProposalMergeConflict::Contract)?;
-    let existing = existing_writes
-        .iter()
-        .zip(&existing_files)
-        .map(|(write, file)| (write.relative_path(), (write, file)))
-        .collect::<BTreeMap<_, _>>();
-
-    if current.writes.len() != current.artifact_files.len() {
-        return Err(NextProposalMergeConflict::Contract);
-    }
-    for (write, file) in current.writes.iter().zip(&current.artifact_files) {
-        if write.relative_path() != file.relative_path
-            || write.source_path().is_some()
-            || file.composition_merge.is_some() != file.composition_merge_key_policy.is_some()
-        {
-            return Err(NextProposalMergeConflict::Contract);
-        }
-        let Some((existing_write, existing_file)) = existing.get(write.relative_path()) else {
-            continue;
-        };
-        if existing_file.role != file.role
-            || existing_file.composition_merge != Some(CompositionFileMerge::JsonObject)
-            || existing_file.composition_merge_key_policy
-                != Some(CompositionMergeKeyPolicy::UniqueKeys)
-            || file.composition_merge != existing_file.composition_merge
-            || file.composition_merge_key_policy != existing_file.composition_merge_key_policy
-        {
-            return Err(NextProposalMergeConflict::Contract);
-        }
-        let existing_keys =
-            merge_object_keys(existing_write).map_err(|_| NextProposalMergeConflict::Contract)?;
-        let current_keys =
-            merge_object_keys(write).map_err(|_| NextProposalMergeConflict::Contract)?;
-        if existing_keys.iter().any(|key| current_keys.contains(key)) {
-            return Err(NextProposalMergeConflict::DuplicateKey {
-                role: file.role.clone(),
-            });
-        }
-    }
-    Ok(())
-}
-
-fn merge_object_keys(write: &ProjectFileWrite) -> Result<BTreeSet<String>, ()> {
-    let bytes = write.bytes().ok_or(())?;
-    let values =
-        serde_json::from_slice::<BTreeMap<String, serde_json::Value>>(bytes).map_err(|_| ())?;
-    if values.values().any(|value| !value.is_string()) {
-        return Err(());
-    }
-    Ok(values.into_keys().collect())
-}
-
 fn composition_artifact_request(
     request: &CompositionGenerateRequest,
     context: &CompositionGenerateContext<'_>,
     run: &RunRecord,
     graph: &ResolvedItemGraph,
-    proposals: &[SingleGenerateCompositionProposal],
+    provenance_nodes: &[CompositionBehaviorProvenance],
     artifact_files: &[ProposedArtifactFile],
     extension: &CompositionGenerateArtifactExtension,
 ) -> Result<ArtifactPublishRequest, CompositionGenerateError> {
@@ -668,10 +532,7 @@ fn composition_artifact_request(
             schema("artifact.composition-generation-provenance"),
             &CompositionGenerationProvenance {
                 graph_digest: graph.graph_digest.clone(),
-                nodes: proposals
-                    .iter()
-                    .map(|proposal| proposal.provenance.clone())
-                    .collect(),
+                nodes: provenance_nodes.to_vec(),
             },
         )?],
         feature_extension: VersionedPayload::from_typed(
@@ -708,7 +569,6 @@ fn validate_context(
             CompositionGenerateFeature::id(),
         ),
         (context.plan_contributions, ModPlanFeature::id()),
-        (context.single_contributions, SingleGenerateFeature::id()),
         (
             context.resource_contributions,
             crate::resource_prepare::ResourcePrepareFeature::id(),
@@ -854,172 +714,6 @@ fn schema_version(id: &str, version: u32) -> SchemaRef {
 mod tests {
     use super::*;
 
-    fn proposal(
-        relative_path: &str,
-        content: &[u8],
-        merge_key_policy: CompositionMergeKeyPolicy,
-    ) -> SingleGenerateCompositionProposal {
-        SingleGenerateCompositionProposal {
-            result: SingleGenerateResult {
-                publication:
-                    crate::mod_generate_single::SingleGeneratePublication::CompositionStaged,
-                artifact_manifest_ref: None,
-                manifest_sha256: None,
-                generated_file_count: 1,
-                validation_primitive: ats_kernel::PrimitiveId::parse("code.fixture-validate")
-                    .unwrap(),
-                acceptance_notes: Vec::new(),
-            },
-            writes: vec![ProjectFileWrite::new(relative_path, content.to_vec()).unwrap()],
-            artifact_files: vec![ProposedArtifactFile {
-                role: "localization.eng".into(),
-                relative_path: relative_path.into(),
-                composition_merge: Some(CompositionFileMerge::JsonObject),
-                composition_merge_key_policy: Some(merge_key_policy),
-            }],
-            provenance: SingleGenerationProvenance {
-                definition_hash: Sha256Digest::parse("a".repeat(64)).unwrap(),
-                model_request_sha256: Sha256Digest::parse("b".repeat(64)).unwrap(),
-                model: "fixture-model".into(),
-                usage: ats_runtime::TokenUsage::default(),
-                selected_resources: Vec::new(),
-            },
-        }
-    }
-
-    #[test]
-    fn json_object_merge_is_sorted_and_rejects_invalid_or_duplicate_entries() {
-        let merged =
-            merge_json_objects(&[br#"{"b":"two"}"#.to_vec(), br#"{"a":"one"}"#.to_vec()]).unwrap();
-        assert_eq!(
-            String::from_utf8(merged).unwrap(),
-            "{\n  \"a\": \"one\",\n  \"b\": \"two\"\n}"
-        );
-        assert!(matches!(
-            merge_json_objects(&[br#"{"a":"one"}"#.to_vec(), br#"{"a":"two"}"#.to_vec()]),
-            Err(CompositionGenerateError::GeneratedFileConflict)
-        ));
-        assert!(matches!(
-            merge_json_objects(&[br#"{"a":{"nested":true}}"#.to_vec()]),
-            Err(CompositionGenerateError::GeneratedFileConflict)
-        ));
-        assert!(matches!(
-            merge_json_objects(&[b"not-json".to_vec()]),
-            Err(CompositionGenerateError::GeneratedFileConflict)
-        ));
-        assert_eq!(
-            CompositionGenerateError::GeneratedFileConflict
-                .run_failure()
-                .code
-                .as_str(),
-            "model.output_invalid"
-        );
-    }
-
-    #[test]
-    fn composition_merge_enforces_shared_and_exclusive_path_policies() {
-        let shared = vec![
-            proposal(
-                "localization/eng/cards.json",
-                br#"{"card_a.title":"A"}"#,
-                CompositionMergeKeyPolicy::UniqueKeys,
-            ),
-            proposal(
-                "localization/eng/cards.json",
-                br#"{"card_b.title":"B"}"#,
-                CompositionMergeKeyPolicy::UniqueKeys,
-            ),
-        ];
-        let (writes, files) = consolidate_proposed_files(&shared).unwrap();
-        assert_eq!(writes.len(), 1);
-        assert_eq!(files.len(), 1);
-        assert_eq!(
-            files[0].composition_merge_key_policy,
-            Some(CompositionMergeKeyPolicy::UniqueKeys)
-        );
-        assert_eq!(
-            String::from_utf8(writes[0].bytes().unwrap().to_vec()).unwrap(),
-            "{\n  \"card_a.title\": \"A\",\n  \"card_b.title\": \"B\"\n}"
-        );
-
-        let exclusive = vec![proposal(
-            "localization/eng/ancients.json",
-            br#"{"THE_ARCHITECT.TALK":"Hello"}"#,
-            CompositionMergeKeyPolicy::ExclusivePath,
-        )];
-        assert!(consolidate_proposed_files(&exclusive).is_ok());
-
-        let duplicate_exclusive = vec![
-            proposal(
-                "localization/eng/ancients.json",
-                br#"{"THE_ARCHITECT.TALK":"Hello"}"#,
-                CompositionMergeKeyPolicy::ExclusivePath,
-            ),
-            proposal(
-                "localization/eng/ancients.json",
-                br#"{"THE_ARCHITECT.TALK_AGAIN":"Hello again"}"#,
-                CompositionMergeKeyPolicy::ExclusivePath,
-            ),
-        ];
-        assert!(matches!(
-            consolidate_proposed_files(&duplicate_exclusive),
-            Err(CompositionGenerateError::GeneratedFileConflict)
-        ));
-
-        let inconsistent = vec![
-            proposal(
-                "localization/eng/items.json",
-                br#"{"item_a.title":"A"}"#,
-                CompositionMergeKeyPolicy::UniqueKeys,
-            ),
-            proposal(
-                "localization/eng/items.json",
-                br#"{"FIXED.TITLE":"B"}"#,
-                CompositionMergeKeyPolicy::ExclusivePath,
-            ),
-        ];
-        assert!(matches!(
-            consolidate_proposed_files(&inconsistent),
-            Err(CompositionGenerateError::GeneratedFileConflict)
-        ));
-    }
-
-    #[test]
-    fn single_boundary_assigns_duplicate_keys_to_the_current_proposal() {
-        let previous = vec![proposal(
-            "localization/eng/cards.json",
-            br#"{"E2EMOD-FIRST_CARD.title":"First"}"#,
-            CompositionMergeKeyPolicy::UniqueKeys,
-        )];
-        let distinct = proposal(
-            "localization/eng/cards.json",
-            br#"{"E2EMOD-SECOND_CARD.title":"Second"}"#,
-            CompositionMergeKeyPolicy::UniqueKeys,
-        );
-        assert!(validate_next_proposal_merge_claims(&previous, &distinct).is_ok());
-
-        let duplicate = proposal(
-            "localization/eng/cards.json",
-            br#"{"E2EMOD-FIRST_CARD.title":"Duplicate"}"#,
-            CompositionMergeKeyPolicy::UniqueKeys,
-        );
-        assert!(matches!(
-            validate_next_proposal_merge_claims(&previous, &duplicate),
-            Err(NextProposalMergeConflict::DuplicateKey { role })
-                if role == "localization.eng"
-        ));
-
-        let exclusive = proposal(
-            "localization/eng/cards.json",
-            br#"{"E2EMOD-SECOND_CARD.title":"Second"}"#,
-            CompositionMergeKeyPolicy::ExclusivePath,
-        );
-        assert!(matches!(
-            validate_next_proposal_merge_claims(&previous, &exclusive),
-            Err(NextProposalMergeConflict::Contract)
-        ));
-    }
-
     #[test]
     fn repair_policy_validates_bounds_and_counts_completed_rounds() {
         assert!(RepairPolicy::UntilPassed.validate().is_ok());
@@ -1046,5 +740,13 @@ mod tests {
                 .validate()
                 .is_err()
         );
+    }
+
+    #[test]
+    fn rendered_file_conflict_is_a_local_adapter_failure() {
+        let failure = CompositionGenerateError::RenderedFileConflict.run_failure();
+
+        assert_eq!(failure.code.as_str(), "game.adapter_invalid");
+        assert_eq!(failure.stage, "composition.render.files");
     }
 }

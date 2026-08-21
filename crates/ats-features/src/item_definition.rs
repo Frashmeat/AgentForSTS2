@@ -393,9 +393,10 @@ mod tests {
     #[test]
     fn ready_validation_resolves_profile_references_and_composition_parameters() {
         let value = serde_json::json!({
-            "schemaVersion":4,
+            "schemaVersion":5,
             "id":"fixture-game",
             "displayName":"Fixture",
+            "behavior": crate::fixture_behavior_json("character"),
             "itemTypes":[
                 {
                     "id":"character",

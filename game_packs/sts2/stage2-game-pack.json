@@ -1,7 +1,89 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "id": "sts2",
   "displayName": "Slay the Spire 2",
+  "behavior": {
+    "adapter": {
+      "id": "game.sts2.behavior",
+      "version": 1,
+      "implementationSha256": "ca4b74a6ce52e03c7ca5751be5742c26bc181f22cf827b42f9d46ccb70f81ebb"
+    },
+    "catalog": {
+      "schemaVersion": 1,
+      "id": "game.sts2.capabilities",
+      "version": 1,
+      "adapter": {
+        "id": "game.sts2.behavior",
+        "version": 1,
+        "implementationSha256": "ca4b74a6ce52e03c7ca5751be5742c26bc181f22cf827b42f9d46ccb70f81ebb"
+      },
+      "capabilities": [
+        {
+          "id": "card.on_play.deal_damage",
+          "description": "Deal fixed card damage on play using the authoritative Card target.",
+          "maxInvocationsPerItem": 1,
+          "parameters": [
+            { "id": "amount", "description": "Base damage amount.", "required": true, "value": { "kind": "integer", "min": 1, "max": 999 } }
+          ]
+        },
+        {
+          "id": "card.on_play.gain_block",
+          "description": "Grant fixed block to the Card owner on play.",
+          "maxInvocationsPerItem": 1,
+          "parameters": [
+            { "id": "amount", "description": "Base block amount.", "required": true, "value": { "kind": "integer", "min": 1, "max": 999 } }
+          ]
+        },
+        {
+          "id": "card.on_play.draw_cards",
+          "description": "Draw a fixed number of cards for the Card owner on play.",
+          "maxInvocationsPerItem": 1,
+          "parameters": [
+            { "id": "amount", "description": "Number of cards.", "required": true, "value": { "kind": "integer", "min": 1, "max": 20 } }
+          ]
+        },
+        {
+          "id": "card.on_play.gain_energy",
+          "description": "Gain a fixed amount of energy for the Card owner on play.",
+          "maxInvocationsPerItem": 1,
+          "parameters": [
+            { "id": "amount", "description": "Energy amount.", "required": true, "value": { "kind": "integer", "min": 1, "max": 9 } }
+          ]
+        },
+        {
+          "id": "relic.combat_start.gain_block",
+          "description": "Grant fixed block to the Relic owner before combat starts.",
+          "maxInvocationsPerItem": 1,
+          "parameters": [
+            { "id": "amount", "description": "Base block amount.", "required": true, "value": { "kind": "integer", "min": 1, "max": 999 } }
+          ]
+        },
+        {
+          "id": "potion.on_use.gain_block",
+          "description": "Grant fixed block to the Potion target on use.",
+          "maxInvocationsPerItem": 1,
+          "parameters": [
+            { "id": "amount", "description": "Base block amount.", "required": true, "value": { "kind": "integer", "min": 1, "max": 999 } }
+          ]
+        },
+        {
+          "id": "power.turn_start.gain_block",
+          "description": "Grant fixed block to the Power owner at player turn start.",
+          "maxInvocationsPerItem": 1,
+          "parameters": [
+            { "id": "amount", "description": "Base block amount.", "required": true, "value": { "kind": "integer", "min": 1, "max": 999 } }
+          ]
+        }
+      ],
+      "itemTypes": [
+        { "itemType": "character", "allowedCapabilities": [], "minInvocations": 0, "maxInvocations": 0 },
+        { "itemType": "card", "allowedCapabilities": ["card.on_play.deal_damage", "card.on_play.gain_block", "card.on_play.draw_cards", "card.on_play.gain_energy"], "minInvocations": 1, "maxInvocations": 4 },
+        { "itemType": "relic", "allowedCapabilities": ["relic.combat_start.gain_block"], "minInvocations": 1, "maxInvocations": 1 },
+        { "itemType": "potion", "allowedCapabilities": ["potion.on_use.gain_block"], "minInvocations": 1, "maxInvocations": 1 },
+        { "itemType": "power", "allowedCapabilities": ["power.turn_start.gain_block"], "minInvocations": 1, "maxInvocations": 1 }
+      ]
+    }
+  },
   "itemTypes": [
     {
       "id": "custom_code",

@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::{RunId, VersionedPayload};
 
-pub const EXECUTION_GRAPH_SCHEMA_VERSION: u32 = 4;
+pub const EXECUTION_GRAPH_SCHEMA_VERSION: u32 = 5;
 pub const MAX_SEMANTIC_REQUESTS: u32 = 20;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
@@ -320,6 +320,7 @@ pub struct ExecutionGraphRecord {
     blueprint: HashedExecutionPayload,
     nodes: BTreeMap<ExecutionNodeId, ExecutionNodeRecord>,
     semantic_request_count: u32,
+    semantic_feedback_count: u32,
     repair_campaign: Option<ExecutionRepairCampaign>,
     graph_failure: Option<ExecutionFailure>,
     commit_intent: Option<ExecutionCommitIntent>,
@@ -375,6 +376,7 @@ impl ExecutionGraphRecord {
             blueprint: HashedExecutionPayload::new(blueprint)?,
             nodes,
             semantic_request_count: 0,
+            semantic_feedback_count: 0,
             repair_campaign: None,
             graph_failure: None,
             commit_intent: None,
@@ -513,6 +515,7 @@ impl ExecutionGraphRecord {
         next.created_at = at;
         next.updated_at = at;
         next.semantic_request_count = 0;
+        next.semantic_feedback_count = 0;
         next.repair_campaign = Some(ExecutionRepairCampaign {
             validation_fingerprint,
             targets: vec![ExecutionRepairTarget {
@@ -606,6 +609,60 @@ impl ExecutionGraphRecord {
                 .get_mut(node_id)
                 .ok_or(ExecutionGraphError::NodeNotFound)?;
             if node.status != ExecutionNodeStatus::Pending {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            node.request_snapshot_hash = request_snapshot_hash;
+            Ok(())
+        })
+    }
+
+    pub fn record_semantic_baseline_request(
+        &mut self,
+        node_id: &ExecutionNodeId,
+        run_id: &RunId,
+        at: DateTime<Utc>,
+    ) -> Result<(), ExecutionGraphError> {
+        self.mutate(at, |next| {
+            if next.status != ExecutionGraphStatus::Running
+                || next.active_run_id.as_ref() != Some(run_id)
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            let node = next
+                .nodes
+                .get_mut(node_id)
+                .ok_or(ExecutionGraphError::NodeNotFound)?;
+            let _ = active_attempt_mut(node, run_id)?;
+            if node.feedback_state.is_some() {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            next.semantic_request_count = next
+                .semantic_request_count
+                .checked_add(1)
+                .ok_or(ExecutionGraphError::InvalidAttempt)?;
+            Ok(())
+        })
+    }
+
+    pub fn update_running_node_request_snapshot_hash(
+        &mut self,
+        node_id: &ExecutionNodeId,
+        run_id: &RunId,
+        request_snapshot_hash: Sha256Digest,
+        at: DateTime<Utc>,
+    ) -> Result<(), ExecutionGraphError> {
+        self.mutate(at, |next| {
+            if next.status != ExecutionGraphStatus::Running
+                || next.active_run_id.as_ref() != Some(run_id)
+            {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
+            let node = next
+                .nodes
+                .get_mut(node_id)
+                .ok_or(ExecutionGraphError::NodeNotFound)?;
+            let _ = active_attempt_mut(node, run_id)?;
+            if node.active_checkpoint.is_some() {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
             node.request_snapshot_hash = request_snapshot_hash;
@@ -860,7 +917,6 @@ impl ExecutionGraphRecord {
         self.mutate(at, |next| {
             if next.status != ExecutionGraphStatus::Repairing
                 || next.active_run_id.as_ref() != Some(run_id)
-                || next.semantic_request_count >= MAX_SEMANTIC_REQUESTS
             {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
@@ -877,11 +933,21 @@ impl ExecutionGraphRecord {
             if target.status != ExecutionRepairTargetStatus::Pending {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
+            let is_adjustment = campaign.adjustment.is_some();
+            if !is_adjustment && next.semantic_feedback_count >= MAX_SEMANTIC_REQUESTS {
+                return Err(ExecutionGraphError::InvalidTransition);
+            }
             target.status = ExecutionRepairTargetStatus::Active;
             next.semantic_request_count = next
                 .semantic_request_count
                 .checked_add(1)
                 .ok_or(ExecutionGraphError::InvalidAttempt)?;
+            if !is_adjustment {
+                next.semantic_feedback_count = next
+                    .semantic_feedback_count
+                    .checked_add(1)
+                    .ok_or(ExecutionGraphError::InvalidAttempt)?;
+            }
             Ok(())
         })
     }
@@ -890,6 +956,34 @@ impl ExecutionGraphRecord {
         &mut self,
         node_id: &ExecutionNodeId,
         run_id: &RunId,
+        checkpoint: VersionedPayload,
+        at: DateTime<Utc>,
+    ) -> Result<(), ExecutionGraphError> {
+        self.complete_repair_target_inner(node_id, run_id, None, checkpoint, at)
+    }
+
+    pub fn complete_repair_target_with_request(
+        &mut self,
+        node_id: &ExecutionNodeId,
+        run_id: &RunId,
+        request_snapshot_hash: Sha256Digest,
+        checkpoint: VersionedPayload,
+        at: DateTime<Utc>,
+    ) -> Result<(), ExecutionGraphError> {
+        self.complete_repair_target_inner(
+            node_id,
+            run_id,
+            Some(request_snapshot_hash),
+            checkpoint,
+            at,
+        )
+    }
+
+    fn complete_repair_target_inner(
+        &mut self,
+        node_id: &ExecutionNodeId,
+        run_id: &RunId,
+        request_snapshot_hash: Option<Sha256Digest>,
         checkpoint: VersionedPayload,
         at: DateTime<Utc>,
     ) -> Result<(), ExecutionGraphError> {
@@ -928,6 +1022,9 @@ impl ExecutionGraphRecord {
             }
             target.checkpoint_hash = replacement.sha256.clone();
             target.status = ExecutionRepairTargetStatus::Completed;
+            if let Some(request_snapshot_hash) = request_snapshot_hash {
+                node.request_snapshot_hash = request_snapshot_hash;
+            }
             node.active_checkpoint = Some(replacement);
             node.safe_failure = None;
             campaign.current_target = campaign
@@ -971,11 +1068,15 @@ impl ExecutionGraphRecord {
                 .map_or(0, |state| state.round)
                 .checked_add(1)
                 .ok_or(ExecutionGraphError::InvalidAttempt)?;
-            if next.semantic_request_count >= MAX_SEMANTIC_REQUESTS {
+            if next.semantic_feedback_count >= MAX_SEMANTIC_REQUESTS {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
             next.semantic_request_count = next
                 .semantic_request_count
+                .checked_add(1)
+                .ok_or(ExecutionGraphError::InvalidAttempt)?;
+            next.semantic_feedback_count = next
+                .semantic_feedback_count
                 .checked_add(1)
                 .ok_or(ExecutionGraphError::InvalidAttempt)?;
             node.feedback_state = Some(ExecutionNodeFeedbackState {
@@ -1026,11 +1127,15 @@ impl ExecutionGraphRecord {
                 .map_or(0, |state| state.round)
                 .checked_add(1)
                 .ok_or(ExecutionGraphError::InvalidAttempt)?;
-            if next.semantic_request_count >= MAX_SEMANTIC_REQUESTS {
+            if next.semantic_feedback_count >= MAX_SEMANTIC_REQUESTS {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
             next.semantic_request_count = next
                 .semantic_request_count
+                .checked_add(1)
+                .ok_or(ExecutionGraphError::InvalidAttempt)?;
+            next.semantic_feedback_count = next
+                .semantic_feedback_count
                 .checked_add(1)
                 .ok_or(ExecutionGraphError::InvalidAttempt)?;
             node.feedback_state = Some(ExecutionNodeFeedbackState {
@@ -1076,6 +1181,28 @@ impl ExecutionGraphRecord {
         checkpoint: VersionedPayload,
         at: DateTime<Utc>,
     ) -> Result<(), ExecutionGraphError> {
+        self.replace_checkpoint_inner(node_id, run_id, None, checkpoint, at)
+    }
+
+    pub fn replace_checkpoint_with_request(
+        &mut self,
+        node_id: &ExecutionNodeId,
+        run_id: &RunId,
+        request_snapshot_hash: Sha256Digest,
+        checkpoint: VersionedPayload,
+        at: DateTime<Utc>,
+    ) -> Result<(), ExecutionGraphError> {
+        self.replace_checkpoint_inner(node_id, run_id, Some(request_snapshot_hash), checkpoint, at)
+    }
+
+    fn replace_checkpoint_inner(
+        &mut self,
+        node_id: &ExecutionNodeId,
+        run_id: &RunId,
+        request_snapshot_hash: Option<Sha256Digest>,
+        checkpoint: VersionedPayload,
+        at: DateTime<Utc>,
+    ) -> Result<(), ExecutionGraphError> {
         self.mutate(at, |next| {
             if next.status != ExecutionGraphStatus::Repairing
                 || next.active_run_id.as_ref() != Some(run_id)
@@ -1088,6 +1215,9 @@ impl ExecutionGraphRecord {
                 .ok_or(ExecutionGraphError::NodeNotFound)?;
             if node.status != ExecutionNodeStatus::Succeeded || node.active_checkpoint.is_none() {
                 return Err(ExecutionGraphError::InvalidTransition);
+            }
+            if let Some(request_snapshot_hash) = request_snapshot_hash {
+                node.request_snapshot_hash = request_snapshot_hash;
             }
             node.active_checkpoint = Some(HashedExecutionPayload::new(checkpoint)?);
             node.safe_failure = None;
@@ -1281,7 +1411,9 @@ impl ExecutionGraphRecord {
             result.validate()?;
         }
         validate_nodes(&self.nodes)?;
-        if self.semantic_request_count > MAX_SEMANTIC_REQUESTS {
+        if self.semantic_feedback_count > MAX_SEMANTIC_REQUESTS
+            || self.semantic_feedback_count > self.semantic_request_count
+        {
             return Err(ExecutionGraphError::InvalidAttempt);
         }
         if let Some(campaign) = &self.repair_campaign {
@@ -1424,6 +1556,11 @@ impl ExecutionGraphRecord {
     }
 
     #[must_use]
+    pub const fn semantic_feedback_count(&self) -> u32 {
+        self.semantic_feedback_count
+    }
+
+    #[must_use]
     pub fn repair_campaign(&self) -> Option<&ExecutionRepairCampaign> {
         self.repair_campaign.as_ref()
     }
@@ -1465,6 +1602,7 @@ impl<'de> Deserialize<'de> for ExecutionGraphRecord {
             blueprint: HashedExecutionPayload,
             nodes: BTreeMap<ExecutionNodeId, ExecutionNodeRecord>,
             semantic_request_count: u32,
+            semantic_feedback_count: u32,
             repair_campaign: Option<ExecutionRepairCampaign>,
             graph_failure: Option<ExecutionFailure>,
             commit_intent: Option<ExecutionCommitIntent>,
@@ -1485,6 +1623,7 @@ impl<'de> Deserialize<'de> for ExecutionGraphRecord {
             blueprint: wire.blueprint,
             nodes: wire.nodes,
             semantic_request_count: wire.semantic_request_count,
+            semantic_feedback_count: wire.semantic_feedback_count,
             repair_campaign: wire.repair_campaign,
             graph_failure: wire.graph_failure,
             commit_intent: wire.commit_intent,
@@ -2221,6 +2360,55 @@ mod tests {
         let mut encoded = serde_json::to_value(graph).unwrap();
         encoded["schemaVersion"] = serde_json::json!(3);
         assert!(serde_json::from_value::<ExecutionGraphRecord>(encoded).is_err());
+    }
+
+    #[test]
+    fn semantic_baselines_do_not_consume_the_shared_feedback_allowance() {
+        let run_id = RunId::parse("run-many-baselines").unwrap();
+        let mut previous = None;
+        let nodes = (0..=MAX_SEMANTIC_REQUESTS)
+            .map(|index| {
+                let node_id = ExecutionNodeId::parse(format!("item.{index:03}.behavior")).unwrap();
+                let spec = ExecutionNodeSpec {
+                    node_id: node_id.clone(),
+                    role_id: "composition.behavior".into(),
+                    depends_on: previous.iter().cloned().collect(),
+                    request_snapshot_hash: digest("b"),
+                };
+                previous = Some(node_id);
+                spec
+            })
+            .collect::<Vec<_>>();
+        let mut graph = ExecutionGraphRecord::new_claimed(
+            ExecutionGraphId::parse("graph-many-baselines").unwrap(),
+            FeatureId::parse("composition.generate").unwrap(),
+            digest("a"),
+            payload("composition.blueprint", 1),
+            nodes.clone(),
+            run_id.clone(),
+            Utc::now(),
+        )
+        .unwrap();
+
+        for (index, node) in nodes.iter().enumerate() {
+            graph
+                .start_node(&node.node_id, &run_id, Utc::now())
+                .unwrap();
+            graph
+                .record_semantic_baseline_request(&node.node_id, &run_id, Utc::now())
+                .unwrap();
+            graph
+                .complete_node(
+                    &node.node_id,
+                    &run_id,
+                    payload("composition.behavior-checkpoint", index as i32),
+                    Utc::now(),
+                )
+                .unwrap();
+        }
+
+        assert_eq!(graph.semantic_request_count(), MAX_SEMANTIC_REQUESTS + 1);
+        assert_eq!(graph.semantic_feedback_count(), 0);
     }
 
     #[test]

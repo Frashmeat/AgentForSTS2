@@ -39,11 +39,11 @@ use ats_features::resource_prepare::{
 };
 use ats_features::{FeatureRegistry, built_in_feature_registry};
 use ats_game_context::{
-    ContributionRequirement, ContributionResolver, EvidenceQuery, GamePackLoader,
-    GamePipelineRegistry, LoadedGamePack, TruthSnapshotRepository, VerifiedContributionSet,
-    VerifiedTruthSnapshot, built_in_game_pack_asset,
+    BehaviorAdapterRegistry, ContributionRequirement, ContributionResolver, EvidenceQuery,
+    GamePackLoader, GamePipelineRegistry, LoadedGamePack, TruthSnapshotRepository,
+    VerifiedContributionSet, VerifiedTruthSnapshot, built_in_game_pack_asset,
 };
-use ats_game_sts2::Sts2PipelineProvider;
+use ats_game_sts2::{Sts2BehaviorAdapter, Sts2PipelineProvider};
 use ats_kernel::{FailureCode, FeatureId, PrimitiveId, SchemaVersion};
 use ats_runtime::{
     CancellationToken, MediaError, ModelClient, ModelRequestLimits, RunFailure, RunRecord,
@@ -60,6 +60,7 @@ pub struct Stage2Composition {
     registry: FeatureRegistry,
     runtime_root: PathBuf,
     model_queue: Arc<ModelRequestQueue>,
+    behavior_adapters: BehaviorAdapterRegistry,
     pipelines: GamePipelineRegistry,
 }
 
@@ -80,7 +81,8 @@ impl Stage2Composition {
         let registry = built_in_feature_registry().map_err(|_| ())?;
         let pipeline_primitives = [
             "feature.mod-plan",
-            "feature.mod-generate-single",
+            "feature.composition-behavior",
+            "game.behavior-render",
             "feature.composition-finalize",
             "feature.project-build",
             "feature.project-package",
@@ -98,12 +100,20 @@ impl Stage2Composition {
         pipelines
             .register(Sts2PipelineProvider::new())
             .map_err(|_| ())?;
+        let mut behavior_adapters = BehaviorAdapterRegistry::new();
+        behavior_adapters
+            .register(Sts2BehaviorAdapter::new())
+            .map_err(|_| ())?;
+        behavior_adapters
+            .resolve_exact(pack.behavior_adapter())
+            .map_err(|_| ())?;
         Ok(Self {
             pack,
             contributions,
             registry,
             runtime_root,
             model_queue: Arc::new(ModelRequestQueue::new()),
+            behavior_adapters,
             pipelines,
         })
     }
@@ -141,10 +151,38 @@ impl Stage2Composition {
     }
 
     pub fn current_truth(&self) -> Result<VerifiedTruthSnapshot, RunFailure> {
-        FileTruthSnapshotRepository::new(self.runtime_root.clone())
+        let truth = FileTruthSnapshotRepository::new(self.runtime_root.clone())
             .open_current(&self.pack)
             .map_err(|_| failure("truth.invalid", "feature.truth"))?
-            .ok_or_else(|| failure("truth.missing", "feature.truth"))
+            .ok_or_else(|| failure("truth.missing", "feature.truth"))?;
+        self.ensure_behavior_readiness(&truth)?;
+        Ok(truth)
+    }
+
+    fn ensure_behavior_readiness(&self, truth: &VerifiedTruthSnapshot) -> Result<(), RunFailure> {
+        let manifest = truth.manifest();
+        if manifest.game_pack_id() != self.pack.id()
+            || manifest.game_pack_sha256() != self.pack.content_sha256()
+        {
+            return Err(failure("truth.invalid", "feature.behavior_readiness"));
+        }
+        let catalog_identity = self
+            .pack
+            .capability_catalog()
+            .identity()
+            .map_err(|_| failure("pack.behavior_invalid", "feature.behavior_readiness"))?;
+        if &catalog_identity != self.pack.capability_catalog_identity()
+            || &self.pack.capability_catalog().adapter != self.pack.behavior_adapter()
+        {
+            return Err(failure(
+                "pack.behavior_invalid",
+                "feature.behavior_readiness",
+            ));
+        }
+        self.behavior_adapters
+            .resolve_exact(self.pack.behavior_adapter())
+            .map_err(|_| failure("game.adapter_unavailable", "feature.behavior_readiness"))?;
+        Ok(())
     }
 
     pub fn prepare_composition_plan_start(
@@ -224,10 +262,6 @@ impl Stage2Composition {
             &ModPlanFeature::id(),
             &[ModPlanFeature::contribution_requirement()],
         )?;
-        let single_contributions = self.resolve(
-            &SingleGenerateFeature::id(),
-            &[SingleGenerateFeature::contribution_requirement()],
-        )?;
         let resource_contributions = self.resolve(
             &ResourcePrepareFeature::id(),
             &[ResourcePrepareFeature::contribution_requirement()],
@@ -242,15 +276,8 @@ impl Stage2Composition {
         )?;
         let plan = ModPlanService::built_in()
             .map_err(|_| failure("feature.recipe_invalid", "composition.generate.plan_recipe"))?;
-        let single = SingleGenerateService::built_in().map_err(|_| {
-            failure(
-                "feature.recipe_invalid",
-                "composition.generate.single_recipe",
-            )
-        })?;
         CompositionGenerateService::new(
             &plan,
-            &single,
             &ProjectBuildService,
             &ProjectPackageService,
             &self.pipelines,
@@ -261,7 +288,6 @@ impl Stage2Composition {
                 pack: &self.pack,
                 composition_contributions: &composition_contributions,
                 plan_contributions: &plan_contributions,
-                single_contributions: &single_contributions,
                 resource_contributions: &resource_contributions,
                 build_contributions: build_contributions.as_ref(),
                 package_contributions: package_contributions.as_ref(),
@@ -295,10 +321,6 @@ impl Stage2Composition {
             &ModPlanFeature::id(),
             &[ModPlanFeature::contribution_requirement()],
         )?;
-        let single_contributions = self.resolve(
-            &SingleGenerateFeature::id(),
-            &[SingleGenerateFeature::contribution_requirement()],
-        )?;
         let resource_contributions = self.resolve(
             &ResourcePrepareFeature::id(),
             &[ResourcePrepareFeature::contribution_requirement()],
@@ -313,15 +335,8 @@ impl Stage2Composition {
         )?;
         let plan = ModPlanService::built_in()
             .map_err(|_| failure("feature.recipe_invalid", "composition.generate.plan_recipe"))?;
-        let single = SingleGenerateService::built_in().map_err(|_| {
-            failure(
-                "feature.recipe_invalid",
-                "composition.generate.single_recipe",
-            )
-        })?;
         CompositionGenerateService::new(
             &plan,
-            &single,
             &ProjectBuildService,
             &ProjectPackageService,
             &self.pipelines,
@@ -334,7 +349,6 @@ impl Stage2Composition {
                 pack: &self.pack,
                 composition_contributions: &composition_contributions,
                 plan_contributions: &plan_contributions,
-                single_contributions: &single_contributions,
                 resource_contributions: &resource_contributions,
                 build_contributions: build_contributions.as_ref(),
                 package_contributions: package_contributions.as_ref(),
@@ -366,10 +380,6 @@ impl Stage2Composition {
             &ModPlanFeature::id(),
             &[ModPlanFeature::contribution_requirement()],
         )?;
-        let single_contributions = self.resolve(
-            &SingleGenerateFeature::id(),
-            &[SingleGenerateFeature::contribution_requirement()],
-        )?;
         let resource_contributions = self.resolve(
             &ResourcePrepareFeature::id(),
             &[ResourcePrepareFeature::contribution_requirement()],
@@ -384,15 +394,8 @@ impl Stage2Composition {
         )?;
         let plan = ModPlanService::built_in()
             .map_err(|_| failure("feature.recipe_invalid", "composition.generate.plan_recipe"))?;
-        let single = SingleGenerateService::built_in().map_err(|_| {
-            failure(
-                "feature.recipe_invalid",
-                "composition.generate.single_recipe",
-            )
-        })?;
         CompositionGenerateService::new(
             &plan,
-            &single,
             &ProjectBuildService,
             &ProjectPackageService,
             &self.pipelines,
@@ -406,7 +409,6 @@ impl Stage2Composition {
                 pack: &self.pack,
                 composition_contributions: &composition_contributions,
                 plan_contributions: &plan_contributions,
-                single_contributions: &single_contributions,
                 resource_contributions: &resource_contributions,
                 build_contributions: build_contributions.as_ref(),
                 package_contributions: package_contributions.as_ref(),
@@ -546,10 +548,6 @@ impl Stage2Composition {
                     &ModPlanFeature::id(),
                     &[ModPlanFeature::contribution_requirement()],
                 )?;
-                let single_contributions = self.resolve(
-                    &SingleGenerateFeature::id(),
-                    &[SingleGenerateFeature::contribution_requirement()],
-                )?;
                 let resource_contributions = self.resolve(
                     &ResourcePrepareFeature::id(),
                     &[ResourcePrepareFeature::contribution_requirement()],
@@ -570,12 +568,6 @@ impl Stage2Composition {
                 let plan = ModPlanService::built_in().map_err(|_| {
                     failure("feature.recipe_invalid", "composition.generate.plan_recipe")
                 })?;
-                let single = SingleGenerateService::built_in().map_err(|_| {
-                    failure(
-                        "feature.recipe_invalid",
-                        "composition.generate.single_recipe",
-                    )
-                })?;
                 let build = ProjectBuildService;
                 let package = ProjectPackageService;
                 let writer = FileProjectWriter;
@@ -584,7 +576,7 @@ impl Stage2Composition {
                 let artifacts = FileArtifactStore::new(project_root.to_path_buf());
                 let build_runner = RegisteredBuildRunner;
                 let package_writer = ZipPackageWriter;
-                CompositionGenerateService::new(&plan, &single, &build, &package, &self.pipelines)
+                CompositionGenerateService::new(&plan, &build, &package, &self.pipelines)
                     .execute_staged(
                         CompositionGenerateDependencies {
                             model: model.client(),
@@ -596,6 +588,7 @@ impl Stage2Composition {
                             artifacts: &artifacts,
                             build_runner: &build_runner,
                             package_writer: &package_writer,
+                            behavior_adapters: &self.behavior_adapters,
                         },
                         repository,
                         graphs,
@@ -605,7 +598,6 @@ impl Stage2Composition {
                             pack: &self.pack,
                             composition_contributions: &composition_contributions,
                             plan_contributions: &plan_contributions,
-                            single_contributions: &single_contributions,
                             resource_contributions: &resource_contributions,
                             build_contributions: build_contributions.as_ref(),
                             package_contributions: package_contributions.as_ref(),
@@ -1242,6 +1234,7 @@ mod tests {
     use ats_workspace::{ItemDefinition, ProjectFolder, StoredItemDefinition};
     use futures_util::stream;
     use sha2::{Digest, Sha256};
+    use tempfile::tempdir;
 
     use super::*;
     use crate::project_session::ProjectSession;
@@ -1321,6 +1314,18 @@ mod tests {
         ) -> Result<ModelStream, ModelError> {
             Ok(Box::pin(stream::empty()))
         }
+    }
+
+    #[test]
+    fn built_in_composition_registers_the_pack_behavior_adapter_exactly() {
+        let temp = tempdir().unwrap();
+        let composition = Stage2Composition::built_in(temp.path().join("runtime")).unwrap();
+        assert!(
+            composition
+                .behavior_adapters
+                .resolve_exact(composition.pack().behavior_adapter())
+                .is_ok()
+        );
     }
 
     #[test]

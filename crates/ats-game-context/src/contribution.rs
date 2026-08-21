@@ -150,9 +150,27 @@ mod tests {
     }
 
     fn pack() -> LoadedGamePack {
-        let json = r#"{"schemaVersion":4,"id":"fixture-game","displayName":"Fixture","itemTypes":[{"id":"fixture_item","displayNames":{"eng":"Fixture item"},"evidenceQueries":[{"symbols":["Fixture.Symbol"],"terms":[]}]}],"contributions":[{"slotId":"log.analyze.rules","featureId":"log.analyze","schema":{"id":"pack.log-rules","version":1},"requiredPrimitives":["log.parser"],"payload":{"format":"fixture"}}]}"#;
-        let hash = Sha256Digest::parse(format!("{:x}", Sha256::digest(json.as_bytes()))).unwrap();
-        GamePackLoader::load(json.as_bytes(), &hash).unwrap()
+        let value = serde_json::json!({
+            "schemaVersion": 5,
+            "id": "fixture-game",
+            "displayName": "Fixture",
+            "behavior": crate::behavior::fixture_behavior_json("fixture_item"),
+            "itemTypes": [{
+                "id": "fixture_item",
+                "displayNames": {"eng": "Fixture item"},
+                "evidenceQueries": [{"symbols": ["Fixture.Symbol"], "terms": []}]
+            }],
+            "contributions": [{
+                "slotId": "log.analyze.rules",
+                "featureId": "log.analyze",
+                "schema": {"id": "pack.log-rules", "version": 1},
+                "requiredPrimitives": ["log.parser"],
+                "payload": {"format": "fixture"}
+            }]
+        });
+        let bytes = serde_json::to_vec(&value).unwrap();
+        let hash = Sha256Digest::parse(format!("{:x}", Sha256::digest(&bytes))).unwrap();
+        GamePackLoader::load(&bytes, &hash).unwrap()
     }
 
     #[test]

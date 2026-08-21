@@ -6,7 +6,7 @@
 >
 > 权威规则：协作与文档治理以仓库根目录 `PROJECT_SPEC.md` 为准。
 >
-> 最后更新：2026-08-18
+> 最后更新：2026-08-20
 
 ## 1. 阅读顺序
 
@@ -26,7 +26,7 @@
 | [`Prompt / 文本资源总览`](./01-总览/Prompt-文本资源总览.md) | Recipe、Pack guidance、Truth 和模型请求的装配边界 | Provider 单次故障流水 |
 | [`当前进度说明`](./02-现状/当前进度说明.md) | 当前代码能力、精确 catalog/hash、机器证据和剩余门禁 | 详细实现协议 |
 | [`当前方案`](./03-当前方案/当前方案.md) | 当前阶段目标、范围、约束、顺序和完成条件 | 历史候选账本 |
-| [`Typed Behavior IR 与 Game Pack 确定性生成架构`](./03-当前方案/Typed-Behavior-IR与Game-Pack确定性生成架构方案.md) | AI 语义 IR、确定性 Game Adapter、诊断路由、请求预算和破坏性 cutover | 当前已实现能力 |
+| [`Typed Behavior IR 与 Game Pack 确定性生成架构`](./03-当前方案/Typed-Behavior-IR与Game-Pack确定性生成架构方案.md) | 已实现的 AI 语义 IR、确定性 Game Adapter、诊断路由、请求预算和破坏性 cutover 合同 | 任务门禁流水 |
 | [`通用执行内核、Game Pipeline Provider 与 Game Pack 边界`](./03-当前方案/通用Mod流水线与Game-Pack边界.md) | 不同游戏如何复用可靠性内核并保留各自生成/构建链路 | 当前已经实现的 Provider 代码合同 |
 
 ## 3. 稳定合同
@@ -47,7 +47,7 @@
 
 | 文档 | 定位 |
 | --- | --- |
-| [`通用执行内核、Game Pipeline Provider 与 Game Pack 边界`](./03-当前方案/通用Mod流水线与Game-Pack边界.md) | Core、Pipeline Provider、Game Adapter 与 Pack 的长期边界；Provider foundation 已完成，当前进入 Typed Behavior IR 与确定性 Adapter 改造 |
+| [`通用执行内核、Game Pipeline Provider 与 Game Pack 边界`](./03-当前方案/通用Mod流水线与Game-Pack边界.md) | Core、Pipeline Provider、Game Adapter 与 Pack 的长期边界；Provider foundation、Typed Behavior IR 和 O10 机器门禁已完成，当前进入 O11 candidate 验收 |
 
 已完成的阶段方案已移入归档：
 

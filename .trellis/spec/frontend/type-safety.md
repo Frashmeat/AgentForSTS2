@@ -50,7 +50,7 @@ StoredItemDefinition:
   definitionHash, definition
 ```
 
-Pack v4 descriptor guards must validate `localizationFields`, `referenceSlots`, optional
+Pack v5 descriptor guards must validate `localizationFields`, `referenceSlots`, optional
 `resourceProfileField`, `resourceProfiles` and bounded `compositionProfiles`. ItemDefinition v2
 guards require field-keyed localization maps, `referenceBindings`, optional typed
 `compositionProfile`, exact camelCase enum payload fields and schemaVersion 2. A TypeScript union
@@ -93,19 +93,18 @@ are 1-128 character qualified identifiers; counts are integers in `0..=u32::MAX`
 are displayed only as a valid pair. Every other field is ignored, never stringified into the UI.
 
 Composition generation submits request schema v6 with an exact `StoredItemDefinition`, optional
-Draft ref, optional nested Package request, immutable `repairPolicy` and optional backend-authored tagged
-`execution` / `adjustment`. Ordinary React always submits the internal `{kind:"until_passed"}`
-policy and does not expose repair-policy or semantic-budget controls. The absolute 20-request
-graph-total safety ceiling still applies. The only
+Draft ref, optional nested Package request, immutable internal `repairPolicy` and optional backend-authored tagged
+`execution` / `adjustment`. Ordinary React always submits `{kind:"until_passed"}`
+and does not expose feedback or semantic-budget controls. Each planned Behavior owns a baseline
+request; the 20-round policy limits only additional shared semantic feedback. The only
 execution forms are `start {executionGraphId}` and
 `resume {executionGraphId, expectedRevision, previousRunId}`; the request builder for an initial
 user submission omits both execution and adjustment. `adjust_composition_item` accepts only the
 selected Graph revision plus one `itemId + expectedDefinitionHash + instruction`; Tauri authors the
 instruction hash and timestamp. A succeeded source derives a new Graph/Run/Artifact version, while
-the source evidence remains immutable. Result and Artifact extension v2 include the graph ID. Single
-result v2 and Package result v2 use the exact
-`published | composition_staged` discriminator. Published results require Artifact ref/hash;
-composition-staged child results must not be presented as independently published Artifacts.
+the source evidence remains immutable. Result and Artifact extension v4 include the graph ID,
+per-Item Behavior request/hash, RenderedItemBundle hash and Adapter identity. React does not decode
+these checkpoints or present a Behavior/Render node as an independently published Artifact.
 Project Build request v2 carries only optional `outputRelativeRoot`; Pack-owned isolation property
 names never enter the React request.
 

@@ -536,9 +536,10 @@ mod tests {
 
     fn pack_with_roles(label: &str, item_type: &str, required_roles: &[&str]) -> LoadedGamePack {
         let value = serde_json::json!({
-            "schemaVersion":4,
+            "schemaVersion":5,
             "id":format!("fixture-{label}"),
             "displayName":format!("Fixture {label}"),
+            "behavior": crate::fixture_behavior_json(item_type),
             "itemTypes":[{
                 "id":item_type,
                 "displayNames":{"eng":"Fixture type"},

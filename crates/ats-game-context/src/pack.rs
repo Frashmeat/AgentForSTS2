@@ -5,11 +5,14 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::{CompositionProfileError, CompositionProfileSet, ItemCatalogError, ItemTypeDescriptor};
+use crate::{
+    BehaviorAdapterIdentity, CapabilityCatalog, CapabilityCatalogIdentity, CompositionProfileError,
+    CompositionProfileSet, ItemCatalogError, ItemTypeDescriptor, PackBehaviorContract,
+};
 
-pub const GAME_PACK_SCHEMA_VERSION: u32 = 4;
+pub const GAME_PACK_SCHEMA_VERSION: u32 = 5;
 pub(crate) const BUILT_IN_STS2_SHA256: &str =
-    "9dfb4d80a8fb5abae41abcb57869b13443038d6ba60ff1129060137bc3d55254";
+    "8e2334db4b3ba1fee369920ef20491adbfb8000a3e4dec5de980e5ee6a1678ac";
 const BUILT_IN_STS2: &[u8] = include_bytes!("../../../game_packs/sts2/stage2-game-pack.json");
 
 #[derive(Debug, Clone)]
@@ -55,6 +58,8 @@ pub struct LoadedGamePack {
     id: GamePackId,
     display_name: String,
     content_sha256: Sha256Digest,
+    behavior: PackBehaviorContract,
+    capability_catalog_identity: CapabilityCatalogIdentity,
     item_types: BTreeMap<ats_kernel::ItemTypeId, ItemTypeDescriptor>,
     composition_profiles: BTreeMap<ats_kernel::CompositionId, CompositionProfileSet>,
     contributions: BTreeMap<ContributionId, PackContribution>,
@@ -79,6 +84,21 @@ impl LoadedGamePack {
     #[must_use]
     pub fn content_sha256(&self) -> &Sha256Digest {
         &self.content_sha256
+    }
+
+    #[must_use]
+    pub fn behavior_adapter(&self) -> &BehaviorAdapterIdentity {
+        &self.behavior.adapter
+    }
+
+    #[must_use]
+    pub fn capability_catalog(&self) -> &CapabilityCatalog {
+        &self.behavior.catalog
+    }
+
+    #[must_use]
+    pub fn capability_catalog_identity(&self) -> &CapabilityCatalogIdentity {
+        &self.capability_catalog_identity
     }
 
     #[must_use]
@@ -140,6 +160,8 @@ pub enum GamePackLoadError {
     InvalidCompositionProfile(#[source] CompositionProfileError),
     #[error("game pack contains duplicate composition profiles or an unknown root item type")]
     InvalidCompositionProfiles,
+    #[error("game pack behavior catalog or adapter identity is invalid")]
+    InvalidBehavior,
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,6 +170,7 @@ struct RawManifest {
     schema_version: u32,
     id: GamePackId,
     display_name: String,
+    behavior: PackBehaviorContract,
     item_types: Vec<ItemTypeDescriptor>,
     #[serde(default)]
     composition_profiles: Vec<CompositionProfileSet>,
@@ -185,6 +208,14 @@ impl GamePackLoader {
             return Err(GamePackLoadError::InvalidDisplayName);
         }
 
+        raw.behavior
+            .validate()
+            .map_err(|_| GamePackLoadError::InvalidBehavior)?;
+        let capability_catalog_identity = raw
+            .behavior
+            .catalog_identity()
+            .map_err(|_| GamePackLoadError::InvalidBehavior)?;
+
         if raw.item_types.is_empty() || raw.item_types.len() > 64 {
             return Err(GamePackLoadError::InvalidItemTypes);
         }
@@ -199,6 +230,15 @@ impl GamePackLoader {
             {
                 return Err(GamePackLoadError::InvalidItemTypes);
             }
+        }
+        if raw
+            .behavior
+            .catalog
+            .item_types
+            .iter()
+            .any(|entry| !item_types.contains_key(&entry.item_type))
+        {
+            return Err(GamePackLoadError::InvalidBehavior);
         }
 
         if raw.composition_profiles.len() > 16 {
@@ -248,6 +288,8 @@ impl GamePackLoader {
             id: raw.id,
             display_name: raw.display_name,
             content_sha256: actual,
+            behavior: raw.behavior,
+            capability_catalog_identity,
             item_types,
             composition_profiles,
             contributions,
@@ -313,13 +355,19 @@ mod tests {
     use super::*;
 
     fn load_fixture(json: &str) -> Result<LoadedGamePack, GamePackLoadError> {
-        GamePackLoader::load(json.as_bytes(), &sha256_bytes(json.as_bytes()))
+        let mut value: serde_json::Value = serde_json::from_str(json).unwrap();
+        if value.get("behavior").is_none() {
+            let item_type = value["itemTypes"][0]["id"].as_str().unwrap().to_owned();
+            value["behavior"] = crate::behavior::fixture_behavior_json(&item_type);
+        }
+        let bytes = serde_json::to_vec(&value).unwrap();
+        GamePackLoader::load(&bytes, &sha256_bytes(&bytes))
     }
 
     #[test]
     fn pinned_loader_accepts_synthetic_and_rejects_hash_schema_and_duplicates() {
         let json = r#"{
-          "schemaVersion":4,
+          "schemaVersion":5,
           "id":"fixture-game",
           "displayName":"Fixture Game",
           "itemTypes":[{
@@ -348,7 +396,7 @@ mod tests {
             Err(GamePackLoadError::ContentHashMismatch)
         ));
 
-        let bad_schema = json.replace("\"schemaVersion\":4", "\"schemaVersion\":1");
+        let bad_schema = json.replace("\"schemaVersion\":5", "\"schemaVersion\":1");
         assert!(matches!(
             load_fixture(&bad_schema),
             Err(GamePackLoadError::UnsupportedSchema)
@@ -370,6 +418,12 @@ mod tests {
         assert_eq!(pack.id().as_str(), "sts2");
         assert!(!pack.contributions.is_empty());
         assert_eq!(pack.item_types().len(), 6);
+        assert_eq!(pack.behavior_adapter().id.as_str(), "game.sts2.behavior");
+        assert_eq!(
+            pack.capability_catalog_identity().id.as_str(),
+            "game.sts2.capabilities"
+        );
+        assert_eq!(pack.capability_catalog().item_types.len(), 5);
         let character = pack
             .item_type(&ItemTypeId::parse("character").unwrap())
             .expect("built-in STS2 Pack declares Character");
@@ -467,7 +521,7 @@ mod tests {
     #[test]
     fn item_catalog_rejects_duplicate_types_and_invalid_field_constraints() {
         let json = r#"{
-          "schemaVersion":4,
+          "schemaVersion":5,
           "id":"fixture-game",
           "displayName":"Fixture Game",
           "itemTypes":[{
@@ -502,9 +556,9 @@ mod tests {
     }
 
     #[test]
-    fn pack_v4_validates_reference_resource_localization_and_composition_profiles() {
+    fn pack_v5_validates_behavior_reference_resource_localization_and_composition_profiles() {
         let value = serde_json::json!({
-            "schemaVersion":4,
+            "schemaVersion":5,
             "id":"fixture-game",
             "displayName":"Fixture Game",
             "itemTypes":[

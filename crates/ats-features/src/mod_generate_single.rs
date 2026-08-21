@@ -176,7 +176,6 @@ enum SingleGenerateFailureReason {
     FileRole,
     FileContent,
     MergeContent,
-    MergeKeyConflict,
     GeneratedFileCountOverflow,
     CheckpointProvenance,
     CheckpointResult,
@@ -379,39 +378,6 @@ impl SingleGenerateProposal {
             provenance: self.provenance,
         }
     }
-
-    pub(crate) fn composition_proposal(&self) -> SingleGenerateCompositionProposal {
-        SingleGenerateCompositionProposal {
-            result: self.result.clone(),
-            writes: self.writes.clone(),
-            artifact_files: self.artifact_files.clone(),
-            provenance: self.provenance.clone(),
-        }
-    }
-
-    pub(crate) fn merge_key_conflict_error(&self, role: String) -> SingleGenerateError {
-        merge_key_conflict_error(&self.checkpoint(), role)
-    }
-}
-
-fn merge_key_conflict_error(
-    checkpoint: &SingleGenerateProposalCheckpoint,
-    role: String,
-) -> SingleGenerateError {
-    let candidate = serde_json::to_vec(&checkpoint.files)
-        .expect("validated Single checkpoint files are serializable");
-    SingleGenerateError::InvalidModelOutput(
-        SingleGenerateFailureDetails::reason(SingleGenerateFailureReason::MergeKeyConflict)
-            .with_output_feedback(
-                OutputContractDiagnostic {
-                    code: OutputContractDiagnosticCode::MergeKeyConflict,
-                    role_id: Some(role),
-                    expected_shape: ExpectedOutputShape::UniqueObjectKeys,
-                    observed_shape: ObservedJsonShape::Object,
-                },
-                candidate_sha256(&candidate),
-            ),
-    )
 }
 
 pub struct SingleProposalDependencies<'a, C, R>
@@ -1849,7 +1815,6 @@ fn is_repairable_output_reason(reason: SingleGenerateFailureReason) -> bool {
             | SingleGenerateFailureReason::FileRole
             | SingleGenerateFailureReason::FileContent
             | SingleGenerateFailureReason::MergeContent
-            | SingleGenerateFailureReason::MergeKeyConflict
     )
 }
 
@@ -1906,9 +1871,6 @@ fn output_contract_diagnostic(
             SingleGenerateFailureReason::FileRole => OutputContractDiagnosticCode::FileRole,
             SingleGenerateFailureReason::FileContent => OutputContractDiagnosticCode::FileContent,
             SingleGenerateFailureReason::MergeContent => OutputContractDiagnosticCode::MergeShape,
-            SingleGenerateFailureReason::MergeKeyConflict => {
-                OutputContractDiagnosticCode::MergeKeyConflict
-            }
             SingleGenerateFailureReason::GeneratedFileCountOverflow
             | SingleGenerateFailureReason::CheckpointProvenance
             | SingleGenerateFailureReason::CheckpointResult => {
@@ -1918,7 +1880,6 @@ fn output_contract_diagnostic(
         role_id: role.map(|spec| spec.role.clone()),
         expected_shape: match reason {
             SingleGenerateFailureReason::MergeContent => ExpectedOutputShape::FlatStringObject,
-            SingleGenerateFailureReason::MergeKeyConflict => ExpectedOutputShape::UniqueObjectKeys,
             SingleGenerateFailureReason::FileContent => ExpectedOutputShape::NonEmptyString,
             SingleGenerateFailureReason::FileCount | SingleGenerateFailureReason::FileRole => {
                 ExpectedOutputShape::ExactDeclaredRoles
@@ -2293,9 +2254,10 @@ mod tests {
     #[test]
     fn synthetic_pack_uses_the_same_generation_and_resource_contracts() {
         let value = serde_json::json!({
-            "schemaVersion": 4,
+            "schemaVersion": 5,
             "id": "fixture-game",
             "displayName": "Fixture Game",
+            "behavior": crate::fixture_behavior_json("fixture_item"),
             "itemTypes": [{
                 "id": "fixture_item",
                 "displayNames": {"eng":"Fixture item"},
@@ -2716,45 +2678,6 @@ mod tests {
         assert_ne!(
             candidate_sha256(b"candidate-a"),
             candidate_sha256(b"candidate-b")
-        );
-    }
-
-    #[test]
-    fn merge_key_conflict_feedback_is_typed_and_redacted() {
-        let checkpoint = SingleGenerateProposalCheckpoint {
-            result: SingleGenerateResult {
-                publication: SingleGeneratePublication::CompositionStaged,
-                artifact_manifest_ref: None,
-                manifest_sha256: None,
-                generated_file_count: 1,
-                validation_primitive: PrimitiveId::parse("code.fixture-validate").unwrap(),
-                acceptance_notes: Vec::new(),
-            },
-            provenance: SingleGenerationProvenance {
-                definition_hash: Sha256Digest::parse("a".repeat(64)).unwrap(),
-                model_request_sha256: Sha256Digest::parse("b".repeat(64)).unwrap(),
-                model: "fixture-model".into(),
-                usage: TokenUsage::default(),
-                selected_resources: Vec::new(),
-            },
-            files: BTreeMap::from([(
-                "localization.eng".into(),
-                r#"{"E2EMOD-CARD.title":"Fixture"}"#.into(),
-            )]),
-        };
-        let error = merge_key_conflict_error(&checkpoint, "localization.eng".into());
-        let evidence = error.output_feedback().unwrap();
-        assert_eq!(
-            evidence.envelope.output_diagnostics[0].code,
-            OutputContractDiagnosticCode::MergeKeyConflict
-        );
-        assert_eq!(
-            evidence.envelope.output_diagnostics[0].expected_shape,
-            ExpectedOutputShape::UniqueObjectKeys
-        );
-        assert_eq!(
-            error.run_failure().details.unwrap().payload(),
-            &serde_json::json!({"reasonCode": "merge_key_conflict"})
         );
     }
 

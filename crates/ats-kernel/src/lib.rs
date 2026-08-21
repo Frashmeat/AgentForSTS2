@@ -116,6 +116,9 @@ qualified_id!(ResourceId, "resource ID");
 qualified_id!(RecipeId, "recipe ID");
 qualified_id!(PipelineProviderId, "pipeline provider ID");
 qualified_id!(PipelineProfileId, "pipeline profile ID");
+qualified_id!(BehaviorAdapterId, "behavior adapter ID");
+qualified_id!(CapabilityCatalogId, "capability catalog ID");
+qualified_id!(BehaviorCapabilityId, "behavior capability ID");
 
 macro_rules! slug_id {
     ($name:ident, $kind:literal, $max_len:literal) => {
@@ -199,6 +202,7 @@ slug_id!(CompositionDraftId, "composition draft ID", 128);
 slug_id!(CompositionProfileId, "composition profile ID", 64);
 slug_id!(CompositionParameterId, "composition parameter ID", 64);
 slug_id!(LocaleId, "locale ID", 16);
+slug_id!(CapabilityParameterId, "capability parameter ID", 64);
 
 #[derive(Debug, Clone, Serialize, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[serde(transparent)]
@@ -521,6 +525,10 @@ mod tests {
         assert!(CompositionProfileId::parse("standard").is_ok());
         assert!(CompositionParameterId::parse("reward_common_cards").is_ok());
         assert!(LocaleId::parse("zhs").is_ok());
+        assert!(BehaviorAdapterId::parse("game.sts2.behavior").is_ok());
+        assert!(CapabilityCatalogId::parse("game.sts2.capabilities").is_ok());
+        assert!(BehaviorCapabilityId::parse("card.deal_damage").is_ok());
+        assert!(CapabilityParameterId::parse("amount").is_ok());
         assert!(ItemId::parse("Generated/Relic").is_err());
     }
 

@@ -1,27 +1,23 @@
 use ats_game_context::{
-    PipelineCheckpointPolicy, PipelineNodePhase, PipelineNodeScope, PipelineResolveRequest,
-    PipelineWorkItem, ResolvedPipelineGraph,
+    BehaviorAdapterIdentity, BehaviorProposal, CapabilityCatalogIdentity, PipelineCheckpointPolicy,
+    PipelineNodePhase, PipelineNodeScope, PipelineResolveRequest, PipelineWorkItem,
+    RenderedItemBundle, ResolvedPipelineGraph,
 };
 use ats_kernel::{ExecutionNodeId, GamePackId, ItemId};
 use ats_runtime::{
     ExecutionAdjustment, ExecutionCommitIntent, ExecutionFailure, ExecutionGraphRecord,
     ExecutionGraphRepository, ExecutionGraphRepositoryError, ExecutionGraphStatus,
     ExecutionNodeSpec, ExecutionNodeStatus, ExecutionRepairTargetSpec, HashedExecutionPayload,
-    RunRepository, RunRepositoryError, hash_json,
+    ProjectFileWrite, RunRepository, RunRepositoryError, hash_json,
 };
 
+use super::behavior::{BehaviorGenerationContext, BehaviorGenerationService};
+use super::render::{RenderItemRequest, render_item};
 use super::*;
-use crate::generation_feedback::{
-    GenerationFeedbackEnvelope, GenerationFeedbackMode, GenerationFeedbackPhase,
-    diagnostic_fingerprint as feedback_fingerprint, generation_feedback_schema,
-};
-use crate::mod_generate_single::{
-    SingleGenerateCompositionProposal, SingleGenerateProposalCheckpoint, SingleRevisionRequest,
-};
-
 const BLUEPRINT_SCHEMA_ID: &str = "feature.composition-generate-blueprint";
 const PLAN_CHECKPOINT_SCHEMA_ID: &str = "feature.composition-generate-plan-checkpoint";
-const SINGLE_CHECKPOINT_SCHEMA_ID: &str = "feature.composition-generate-single-checkpoint";
+const BEHAVIOR_CHECKPOINT_SCHEMA_ID: &str = "feature.composition-generate-behavior-checkpoint";
+const RENDER_CHECKPOINT_SCHEMA_ID: &str = "feature.composition-generate-render-checkpoint";
 const FINALIZE_CHECKPOINT_SCHEMA_ID: &str = "feature.composition-generate-finalize-checkpoint";
 const COMMIT_INTENT_SCHEMA_ID: &str = "feature.composition-generate-commit-intent";
 
@@ -114,18 +110,14 @@ struct CompiledDeliveryPipeline {
     publish_node_id: ExecutionNodeId,
 }
 
-enum CampaignRevision {
-    GeneratedContent(GenerationFeedbackEnvelope),
-    Adjustment(ItemAdjustment),
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StagedCompositionGenerateItem {
     item_id: ItemId,
     definition_hash: Sha256Digest,
     plan_node_id: ExecutionNodeId,
-    single_node_id: ExecutionNodeId,
+    behavior_node_id: ExecutionNodeId,
+    render_node_id: ExecutionNodeId,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -137,9 +129,31 @@ struct StagedPlanCheckpoint {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct StagedSingleCheckpoint {
-    proposal: SingleGenerateProposalCheckpoint,
-    child_run: RunRecord,
+struct StagedBehaviorCheckpoint {
+    pack_id: GamePackId,
+    pack_sha256: Sha256Digest,
+    truth_snapshot_id: Sha256Digest,
+    catalog: CapabilityCatalogIdentity,
+    adapter: BehaviorAdapterIdentity,
+    definition_hash: Sha256Digest,
+    request_snapshot: ats_runtime::ModelRequestSnapshot,
+    response_model: String,
+    usage: ats_runtime::TokenUsage,
+    behavior_sha256: Sha256Digest,
+    proposal: BehaviorProposal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StagedRenderCheckpoint {
+    pack_id: GamePackId,
+    pack_sha256: Sha256Digest,
+    truth_snapshot_id: Sha256Digest,
+    catalog: CapabilityCatalogIdentity,
+    adapter: BehaviorAdapterIdentity,
+    behavior_sha256: Sha256Digest,
+    rendered_bundle_sha256: Sha256Digest,
+    bundle: RenderedItemBundle,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -154,7 +168,7 @@ struct StagedFinalizeCheckpoint {
 
 type PreparedCompositionAssembly = Result<
     (
-        Vec<SingleGenerateCompositionProposal>,
+        Vec<CompositionBehaviorProvenance>,
         Vec<ProjectFileWrite>,
         Vec<ProposedArtifactFile>,
         StagedFinalizeCheckpoint,
@@ -210,7 +224,7 @@ impl CompositionGenerateService<'_> {
             .resolve(&contribution.pipeline, &pipeline_request)?;
         let (prepare, staged_items, _, specs) = compile_generation_nodes(&pipeline, &resolved)?;
         let blueprint = StagedCompositionGenerateBlueprint {
-            schema_version: 7,
+            schema_version: 8,
             model_request_limits: context.model_request_limits,
             game_pack_id: context.pack.id().clone(),
             game_pack_sha256: context.pack.content_sha256().clone(),
@@ -315,7 +329,7 @@ impl CompositionGenerateService<'_> {
         if item.definition_hash != adjustment.expected_definition_hash {
             return Err(CompositionGenerateError::AdjustmentStale);
         }
-        let checkpoint_hash = graph.nodes()[&item.single_node_id]
+        let checkpoint_hash = graph.nodes()[&item.behavior_node_id]
             .active_checkpoint
             .as_ref()
             .ok_or(CompositionGenerateError::InvalidCheckpoint)?
@@ -340,7 +354,7 @@ impl CompositionGenerateService<'_> {
         request.adjustment = Some(adjustment);
         let target = ExecutionRepairTargetSpec {
             item_id: adjustment_item_id,
-            node_id: item.single_node_id.clone(),
+            node_id: item.behavior_node_id.clone(),
             checkpoint_hash,
             diagnostic_fingerprints: vec![instruction_sha256.clone()],
             feedback,
@@ -471,7 +485,6 @@ impl CompositionGenerateService<'_> {
         }
 
         if graph.status() == ExecutionGraphStatus::Running {
-            let mut accepted_proposals = Vec::with_capacity(blueprint.items.len());
             for (item, definition) in blueprint.items.iter().zip(&resolved.nodes) {
                 handle_cancellation(&mut graph, graphs, run.id(), cancellation)?;
                 let plan_checkpoint = if node_status(&graph, &item.plan_node_id)?
@@ -574,132 +587,76 @@ impl CompositionGenerateService<'_> {
                 };
 
                 handle_cancellation(&mut graph, graphs, run.id(), cancellation)?;
-                let single_request = SingleGenerateRequest {
-                    artifact_id: definition.definition.item_id.to_string(),
-                    mod_id: request.mod_id.clone(),
-                    plan: plan_checkpoint.plan.clone(),
-                    definition: definition.clone(),
-                };
-                if node_status(&graph, &item.single_node_id)? != ExecutionNodeStatus::Succeeded {
-                    bind_and_start_node(
-                        &mut graph,
-                        graphs,
-                        &item.single_node_id,
-                        run.id(),
-                        request_hash::<SingleGenerateFeature, _>(&single_request)?,
-                    )?;
-                    let proposal = loop {
-                        let persisted_feedback = graph.nodes()[&item.single_node_id]
+                let behavior_checkpoint = if node_status(&graph, &item.behavior_node_id)?
+                    == ExecutionNodeStatus::Succeeded
+                {
+                    decode_behavior_checkpoint(&graph, item, definition, &context)?
+                } else {
+                    let behavior = BehaviorGenerationService::built_in()?;
+                    let mut first_request = true;
+                    let generated = loop {
+                        let feedback = graph.nodes()[&item.behavior_node_id]
                             .feedback_state
                             .as_ref()
                             .filter(|state| {
                                 state.phase == ats_runtime::ExecutionFeedbackPhase::OutputContract
                             })
                             .map(|state| {
-                                state.feedback.payload.decode::<GenerationFeedbackEnvelope>(
-                                    &generation_feedback_schema(),
-                                )
+                                state
+                                    .feedback
+                                    .payload
+                                    .decode::<super::behavior::BehaviorFeedback>(
+                                        &behavior_feedback_schema(),
+                                    )
                             })
                             .transpose()
                             .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-                        if persisted_feedback.as_ref().is_some_and(|feedback| {
-                            !feedback.is_valid()
-                                || feedback.phase != GenerationFeedbackPhase::OutputContract
-                        }) {
-                            return Err(CompositionGenerateError::InvalidCheckpoint);
-                        }
-                        let mut child_run =
-                            running_run::<SingleGenerateFeature, _>(&single_request)?;
-                        let generated = if let Some(feedback) = &persisted_feedback {
-                            self.single
-                                .feedback_propose(
-                                    SingleProposalDependencies {
-                                        model: dependencies.model,
-                                        resources: dependencies.resources,
-                                    },
-                                    &child_run,
-                                    &single_request,
-                                    &single_context(&context, blueprint.model_request_limits),
-                                    feedback,
-                                    cancellation,
-                                )
-                                .await
-                        } else {
-                            self.single
-                                .propose(
-                                    SingleProposalDependencies {
-                                        model: dependencies.model,
-                                        resources: dependencies.resources,
-                                    },
-                                    &child_run,
-                                    &single_request,
-                                    &single_context(&context, blueprint.model_request_limits),
-                                    cancellation,
-                                )
-                                .await
+                        let behavior_context = BehaviorGenerationContext {
+                            pack: context.pack,
+                            truth_snapshot_id: context.truth.manifest().snapshot_id(),
+                            definition,
+                            plan: &plan_checkpoint.plan,
+                            project_context: context.project_context,
+                            custom_instructions: context.custom_instructions,
+                            model: context.model.clone(),
+                            model_request_limits: blueprint.model_request_limits,
+                            feedback: feedback.as_ref(),
                         };
-                        let generated = match generated {
-                            Ok(proposal) => match validate_next_proposal_merge_claims(
-                                &accepted_proposals,
-                                &proposal.composition_proposal(),
-                            ) {
-                                Ok(()) => Ok(proposal),
-                                Err(NextProposalMergeConflict::DuplicateKey { role }) => {
-                                    Err(proposal.merge_key_conflict_error(role))
-                                }
-                                Err(NextProposalMergeConflict::Contract) => {
-                                    let error = CompositionGenerateError::GeneratedFileConflict;
-                                    finish_failed_child(
-                                        &mut child_run,
-                                        error.run_failure(),
-                                        cancellation,
-                                    )?;
-                                    if let Err(storage_error) = persist_child(runs, &child_run) {
-                                        pause_failed_node(
-                                            &mut graph,
-                                            graphs,
-                                            &item.single_node_id,
-                                            run.id(),
-                                            &storage_error,
-                                        )?;
-                                        return Err(storage_error);
-                                    }
-                                    pause_failed_node(
-                                        &mut graph,
-                                        graphs,
-                                        &item.single_node_id,
+                        let snapshot = behavior.prepare(&behavior_context)?;
+                        if first_request {
+                            bind_and_start_node(
+                                &mut graph,
+                                graphs,
+                                &item.behavior_node_id,
+                                run.id(),
+                                snapshot.request_sha256().clone(),
+                            )?;
+                            if feedback.is_none() {
+                                mutate_graph(&mut graph, graphs, |graph| {
+                                    graph.record_semantic_baseline_request(
+                                        &item.behavior_node_id,
                                         run.id(),
-                                        &error,
-                                    )?;
-                                    return Err(error);
-                                }
-                            },
-                            Err(error) => Err(error),
-                        };
-                        match generated {
-                            Ok(proposal) => {
-                                succeed_child::<SingleGenerateFeature, _>(
-                                    &mut child_run,
-                                    &proposal.result,
-                                )?;
-                                break (proposal, child_run);
+                                        Utc::now(),
+                                    )
+                                })?;
                             }
+                            first_request = false;
+                        } else {
+                            mutate_graph(&mut graph, graphs, |graph| {
+                                graph.update_running_node_request_snapshot_hash(
+                                    &item.behavior_node_id,
+                                    run.id(),
+                                    snapshot.request_sha256().clone(),
+                                    Utc::now(),
+                                )
+                            })?;
+                        }
+                        match behavior
+                            .generate(dependencies.model, behavior_context, snapshot, cancellation)
+                            .await
+                        {
+                            Ok(generated) => break generated,
                             Err(error) => {
-                                finish_failed_child(
-                                    &mut child_run,
-                                    error.run_failure(),
-                                    cancellation,
-                                )?;
-                                if let Err(storage_error) = persist_child(runs, &child_run) {
-                                    pause_failed_node(
-                                        &mut graph,
-                                        graphs,
-                                        &item.single_node_id,
-                                        run.id(),
-                                        &storage_error,
-                                    )?;
-                                    return Err(storage_error);
-                                }
                                 if cancellation.is_cancelled() {
                                     return handle_cancellation(
                                         &mut graph,
@@ -709,31 +666,34 @@ impl CompositionGenerateService<'_> {
                                     )
                                     .and(Err(CompositionGenerateError::Cancelled));
                                 }
-                                let Some(evidence) = error.output_feedback().cloned() else {
-                                    let error = CompositionGenerateError::Single(error);
+                                let Some(evidence) = error.feedback_evidence() else {
+                                    let error = CompositionGenerateError::Behavior(error);
                                     pause_failed_node(
                                         &mut graph,
                                         graphs,
-                                        &item.single_node_id,
+                                        &item.behavior_node_id,
                                         run.id(),
                                         &error,
                                     )?;
                                     return Err(error);
                                 };
-                                let completed_rounds = graph.semantic_request_count();
+                                let completed_rounds = graph.nodes()[&item.behavior_node_id]
+                                    .feedback_state
+                                    .as_ref()
+                                    .map_or(0, |state| state.round);
                                 if !request.repair_policy.permits(completed_rounds) {
                                     pause_running_node_with_code(
                                         &mut graph,
                                         graphs,
-                                        &item.single_node_id,
+                                        &item.behavior_node_id,
                                         run.id(),
                                         "model.feedback_exhausted",
                                     )?;
-                                    return Err(CompositionGenerateError::Single(error));
+                                    return Err(CompositionGenerateError::Behavior(error));
                                 }
-                                let fingerprint = feedback_fingerprint(&evidence.envelope)
+                                let fingerprint = hash_json(&evidence.feedback)
                                     .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-                                if graph.nodes()[&item.single_node_id]
+                                if graph.nodes()[&item.behavior_node_id]
                                     .feedback_state
                                     .as_ref()
                                     .is_some_and(|state| {
@@ -745,22 +705,22 @@ impl CompositionGenerateService<'_> {
                                     pause_running_node_with_code(
                                         &mut graph,
                                         graphs,
-                                        &item.single_node_id,
+                                        &item.behavior_node_id,
                                         run.id(),
                                         "model.feedback_no_progress",
                                     )?;
-                                    return Err(CompositionGenerateError::Single(error));
+                                    return Err(CompositionGenerateError::Behavior(error));
                                 }
                                 mutate_graph(&mut graph, graphs, |graph| {
                                     graph.record_output_feedback(
-                                        &item.single_node_id,
+                                        &item.behavior_node_id,
                                         run.id(),
                                         ats_runtime::ExecutionOutputFeedback {
                                             diagnostic_fingerprint: fingerprint,
                                             candidate_sha256: evidence.candidate_sha256,
                                             feedback: VersionedPayload::from_typed(
-                                                generation_feedback_schema(),
-                                                &evidence.envelope,
+                                                behavior_feedback_schema(),
+                                                &evidence.feedback,
                                             )
                                             .map_err(|_| {
                                                 ats_runtime::ExecutionGraphError::InvalidMetadata
@@ -772,46 +732,112 @@ impl CompositionGenerateService<'_> {
                             }
                         }
                     };
-                    let (proposal, child_run) = proposal;
-                    let checkpoint = StagedSingleCheckpoint {
-                        proposal: proposal.checkpoint(),
-                        child_run,
+                    let behavior_sha256 = generated
+                        .proposal
+                        .sha256()
+                        .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+                    let checkpoint = StagedBehaviorCheckpoint {
+                        pack_id: context.pack.id().clone(),
+                        pack_sha256: context.pack.content_sha256().clone(),
+                        truth_snapshot_id: context.truth.manifest().snapshot_id().clone(),
+                        catalog: context.pack.capability_catalog_identity().clone(),
+                        adapter: context.pack.behavior_adapter().clone(),
+                        definition_hash: definition.definition_hash.clone(),
+                        request_snapshot: generated.request_snapshot,
+                        response_model: generated.response_model,
+                        usage: generated.usage,
+                        behavior_sha256,
+                        proposal: generated.proposal,
                     };
                     complete_node(
                         &mut graph,
                         graphs,
-                        &item.single_node_id,
+                        &item.behavior_node_id,
                         run.id(),
-                        VersionedPayload::from_typed(single_checkpoint_schema(), &checkpoint)?,
+                        VersionedPayload::from_typed(behavior_checkpoint_schema(), &checkpoint)?,
                     )?;
-                    persist_completed_child(
-                        runs,
-                        &checkpoint.child_run,
+                    checkpoint
+                };
+
+                handle_cancellation(&mut graph, graphs, run.id(), cancellation)?;
+                if node_status(&graph, &item.render_node_id)? != ExecutionNodeStatus::Succeeded {
+                    bind_and_start_node(
                         &mut graph,
                         graphs,
+                        &item.render_node_id,
                         run.id(),
+                        behavior_checkpoint.behavior_sha256.clone(),
                     )?;
-                    accepted_proposals.push(proposal.composition_proposal());
-                } else {
-                    let checkpoint = decode_single_checkpoint(&graph, item, definition)?;
-                    let restored = self.single.restore_composition_proposal(
+                    let (bundle, _) = match render_item(
+                        dependencies.behavior_adapters,
+                        context.pack,
+                        context.resource_contributions,
                         dependencies.resources,
-                        &single_request,
-                        &single_context(&context, blueprint.model_request_limits),
-                        &checkpoint.proposal,
-                    )?;
-                    validate_next_proposal_merge_claims(&accepted_proposals, &restored)
-                        .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-                    accepted_proposals.push(restored);
-                    persist_completed_child(
-                        runs,
-                        &checkpoint.child_run,
+                        RenderItemRequest {
+                            graph: &resolved,
+                            definition,
+                            mod_id: &request.mod_id,
+                            proposal: &behavior_checkpoint.proposal,
+                        },
+                    ) {
+                        Ok(rendered) => rendered,
+                        Err(error) => {
+                            let error = CompositionGenerateError::Render(error);
+                            pause_failed_node(
+                                &mut graph,
+                                graphs,
+                                &item.render_node_id,
+                                run.id(),
+                                &error,
+                            )?;
+                            return Err(error);
+                        }
+                    };
+                    let checkpoint = StagedRenderCheckpoint {
+                        pack_id: context.pack.id().clone(),
+                        pack_sha256: context.pack.content_sha256().clone(),
+                        truth_snapshot_id: context.truth.manifest().snapshot_id().clone(),
+                        catalog: context.pack.capability_catalog_identity().clone(),
+                        adapter: context.pack.behavior_adapter().clone(),
+                        behavior_sha256: behavior_checkpoint.behavior_sha256.clone(),
+                        rendered_bundle_sha256: hash_json(&bundle)
+                            .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?,
+                        bundle,
+                    };
+                    complete_node(
                         &mut graph,
                         graphs,
+                        &item.render_node_id,
                         run.id(),
+                        VersionedPayload::from_typed(render_checkpoint_schema(), &checkpoint)?,
+                    )?;
+                } else {
+                    decode_render_checkpoint(
+                        &graph,
+                        item,
+                        definition,
+                        &behavior_checkpoint,
+                        &context,
                     )?;
                 }
             }
+        }
+
+        if graph.status() == ExecutionGraphStatus::Repairing && request.adjustment.is_some() {
+            self.execute_behavior_adjustment(
+                dependencies.model,
+                dependencies.resources,
+                dependencies.behavior_adapters,
+                &mut graph,
+                graphs,
+                run.id(),
+                &request,
+                &context,
+                &resolved,
+                &blueprint,
+                cancellation,
+            )
+            .await?;
         }
 
         let output_node_id = blueprint.prepare.output_node_id();
@@ -821,47 +847,12 @@ impl CompositionGenerateService<'_> {
             start_local_node(&mut graph, graphs, output_node_id, run.id())?;
         }
         let assembled = match &blueprint.prepare {
-            CompiledPreparePipeline::ItemGeneration { .. } => (|| {
-                let (proposals, item_results) = restore_proposals(
-                    self,
-                    dependencies.resources,
-                    &request,
-                    &context,
-                    &resolved,
-                    &blueprint,
-                    &graph,
-                    runs,
-                )?;
-                let validation_primitive = proposals
-                    .first()
-                    .map(|proposal| proposal.result.validation_primitive.clone())
-                    .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
-                if proposals
-                    .iter()
-                    .any(|proposal| proposal.result.validation_primitive != validation_primitive)
-                {
-                    return Err(CompositionGenerateError::ValidationPrimitiveMismatch);
-                }
-                let (generated_writes, generated_artifact_files) =
-                    consolidate_proposed_files(&proposals)?;
-                ats_runtime::validate_project_writes(&generated_writes)?;
-                let finalize_checkpoint = StagedFinalizeCheckpoint {
-                    graph_digest: resolved.graph_digest.clone(),
-                    validation_primitive: Some(validation_primitive),
-                    generated_file_count: u32::try_from(generated_artifact_files.len())
-                        .map_err(|_| CompositionGenerateError::InvalidInput)?,
-                    items: item_results,
-                };
-                Ok((
-                    proposals,
-                    generated_writes,
-                    generated_artifact_files,
-                    finalize_checkpoint,
-                ))
-            })(),
+            CompiledPreparePipeline::ItemGeneration { .. } => {
+                restore_rendered_assembly(&context, &resolved, &blueprint, &graph, runs)
+            }
             CompiledPreparePipeline::DataJson { .. } => render_data_json(&resolved),
         };
-        let (proposals, generated_writes, generated_artifact_files, finalize_checkpoint) =
+        let (provenance, generated_writes, generated_artifact_files, finalize_checkpoint) =
             match assembled {
                 Ok(value) => value,
                 Err(error) => {
@@ -925,7 +916,7 @@ impl CompositionGenerateService<'_> {
                 &context,
                 &resolved,
                 &blueprint.pipeline,
-                proposals,
+                provenance,
                 generated_writes,
                 generated_artifact_files,
                 finalize_checkpoint,
@@ -943,6 +934,256 @@ impl CompositionGenerateService<'_> {
     }
 
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+    async fn execute_behavior_adjustment<C, R, G>(
+        &self,
+        model: &C,
+        resources: &R,
+        behavior_adapters: &ats_game_context::BehaviorAdapterRegistry,
+        graph: &mut ExecutionGraphRecord,
+        graphs: &G,
+        run_id: &RunId,
+        request: &CompositionGenerateRequest,
+        context: &CompositionGenerateContext<'_>,
+        resolved: &ResolvedItemGraph,
+        blueprint: &StagedCompositionGenerateBlueprint,
+        cancellation: &CancellationToken,
+    ) -> Result<(), CompositionGenerateError>
+    where
+        C: ModelClient + ?Sized,
+        R: ResourceRepository + ?Sized,
+        G: ExecutionGraphRepository + ?Sized,
+    {
+        let adjustment = request
+            .adjustment
+            .as_ref()
+            .ok_or(CompositionGenerateError::AdjustmentInvalid)?;
+        let campaign = graph
+            .repair_campaign()
+            .cloned()
+            .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
+        let target = campaign
+            .targets
+            .first()
+            .filter(|_| campaign.targets.len() == 1)
+            .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
+        let persisted_adjustment: ItemAdjustment = target
+            .feedback
+            .payload
+            .decode(&item_adjustment_schema())
+            .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+        let item_index = blueprint
+            .items
+            .iter()
+            .position(|item| {
+                item.item_id == target.item_id && item.behavior_node_id == target.node_id
+            })
+            .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
+        let item = &blueprint.items[item_index];
+        let definition = &resolved.nodes[item_index];
+        if &persisted_adjustment != adjustment
+            || adjustment.item_id != definition.definition.item_id
+            || adjustment.expected_definition_hash != definition.definition_hash
+            || campaign.adjustment.as_ref().is_none_or(|value| {
+                value.item_id != adjustment.item_id
+                    || value.expected_definition_hash != adjustment.expected_definition_hash
+                    || value.instruction_sha256 != adjustment.instruction_sha256
+                    || value.feedback.sha256 != target.feedback.sha256
+            })
+        {
+            return Err(CompositionGenerateError::InvalidCheckpoint);
+        }
+
+        if target.status != ats_runtime::ExecutionRepairTargetStatus::Completed {
+            let plan = decode_plan_checkpoint(graph, item, definition)?;
+            let behavior_service = BehaviorGenerationService::built_in()?;
+            if target.status == ats_runtime::ExecutionRepairTargetStatus::Pending {
+                mutate_graph(graph, graphs, |graph| {
+                    graph.activate_repair_target(run_id, Utc::now())
+                })?;
+            }
+            let generated = loop {
+                let feedback = graph.nodes()[&item.behavior_node_id]
+                    .feedback_state
+                    .as_ref()
+                    .filter(|state| {
+                        state.phase == ats_runtime::ExecutionFeedbackPhase::OutputContract
+                            && state.checkpoint_hash.as_ref() == Some(&target.checkpoint_hash)
+                    })
+                    .map(|state| {
+                        state
+                            .feedback
+                            .payload
+                            .decode::<super::behavior::BehaviorFeedback>(
+                                &behavior_feedback_schema(),
+                            )
+                    })
+                    .transpose()
+                    .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+                let behavior_context = BehaviorGenerationContext {
+                    pack: context.pack,
+                    truth_snapshot_id: context.truth.manifest().snapshot_id(),
+                    definition,
+                    plan: &plan.plan,
+                    project_context: context.project_context,
+                    custom_instructions: Some(&adjustment.instruction),
+                    model: context.model.clone(),
+                    model_request_limits: blueprint.model_request_limits,
+                    feedback: feedback.as_ref(),
+                };
+                let snapshot = behavior_service.prepare(&behavior_context)?;
+                match behavior_service
+                    .generate(model, behavior_context, snapshot, cancellation)
+                    .await
+                {
+                    Ok(generated) => break generated,
+                    Err(error) => {
+                        if cancellation.is_cancelled() {
+                            return handle_cancellation(graph, graphs, run_id, cancellation);
+                        }
+                        let Some(evidence) = error.feedback_evidence() else {
+                            let error = CompositionGenerateError::Behavior(error);
+                            pause_repair_after_error(graph, graphs, run_id, &error)?;
+                            return Err(error);
+                        };
+                        let completed_rounds = graph.nodes()[&item.behavior_node_id]
+                            .feedback_state
+                            .as_ref()
+                            .map_or(0, |state| state.round);
+                        if !request.repair_policy.permits(completed_rounds) {
+                            pause_repair_with_code(
+                                graph,
+                                graphs,
+                                run_id,
+                                "model.feedback_exhausted",
+                            )?;
+                            let error = CompositionGenerateError::Behavior(error);
+                            return Err(error);
+                        }
+                        let fingerprint = hash_json(&evidence.feedback)
+                            .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+                        if graph.nodes()[&item.behavior_node_id]
+                            .feedback_state
+                            .as_ref()
+                            .is_some_and(|state| {
+                                state.diagnostic_fingerprint == fingerprint
+                                    && state.candidate_sha256.as_ref()
+                                        == Some(&evidence.candidate_sha256)
+                                    && state.checkpoint_hash.as_ref()
+                                        == Some(&target.checkpoint_hash)
+                            })
+                        {
+                            pause_repair_with_code(
+                                graph,
+                                graphs,
+                                run_id,
+                                "model.feedback_no_progress",
+                            )?;
+                            let error = CompositionGenerateError::Behavior(error);
+                            return Err(error);
+                        }
+                        mutate_graph(graph, graphs, |graph| {
+                            graph.record_repair_output_feedback(
+                                &item.behavior_node_id,
+                                run_id,
+                                target.checkpoint_hash.clone(),
+                                ats_runtime::ExecutionOutputFeedback {
+                                    diagnostic_fingerprint: fingerprint,
+                                    candidate_sha256: evidence.candidate_sha256,
+                                    feedback: VersionedPayload::from_typed(
+                                        behavior_feedback_schema(),
+                                        &evidence.feedback,
+                                    )
+                                    .map_err(|_| {
+                                        ats_runtime::ExecutionGraphError::InvalidMetadata
+                                    })?,
+                                },
+                                Utc::now(),
+                            )
+                        })?;
+                    }
+                }
+            };
+            let behavior_sha256 = generated
+                .proposal
+                .sha256()
+                .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+            let current_behavior = decode_behavior_checkpoint(graph, item, definition, context)?;
+            if current_behavior.behavior_sha256 == behavior_sha256 {
+                let error = CompositionGenerateError::AdjustmentInvalid;
+                pause_repair_after_error(graph, graphs, run_id, &error)?;
+                return Err(error);
+            }
+            let checkpoint = StagedBehaviorCheckpoint {
+                pack_id: context.pack.id().clone(),
+                pack_sha256: context.pack.content_sha256().clone(),
+                truth_snapshot_id: context.truth.manifest().snapshot_id().clone(),
+                catalog: context.pack.capability_catalog_identity().clone(),
+                adapter: context.pack.behavior_adapter().clone(),
+                definition_hash: definition.definition_hash.clone(),
+                request_snapshot: generated.request_snapshot,
+                response_model: generated.response_model,
+                usage: generated.usage,
+                behavior_sha256,
+                proposal: generated.proposal,
+            };
+            let request_sha256 = checkpoint.request_snapshot.request_sha256().clone();
+            let payload = VersionedPayload::from_typed(behavior_checkpoint_schema(), &checkpoint)?;
+            mutate_graph(graph, graphs, |graph| {
+                graph.complete_repair_target_with_request(
+                    &item.behavior_node_id,
+                    run_id,
+                    request_sha256,
+                    payload,
+                    Utc::now(),
+                )
+            })?;
+        }
+
+        let behavior = decode_behavior_checkpoint(graph, item, definition, context)?;
+        let (bundle, _) = match render_item(
+            behavior_adapters,
+            context.pack,
+            context.resource_contributions,
+            resources,
+            RenderItemRequest {
+                graph: resolved,
+                definition,
+                mod_id: &request.mod_id,
+                proposal: &behavior.proposal,
+            },
+        ) {
+            Ok(rendered) => rendered,
+            Err(error) => {
+                let error = CompositionGenerateError::Render(error);
+                pause_repair_after_error(graph, graphs, run_id, &error)?;
+                return Err(error);
+            }
+        };
+        let render_checkpoint = StagedRenderCheckpoint {
+            pack_id: context.pack.id().clone(),
+            pack_sha256: context.pack.content_sha256().clone(),
+            truth_snapshot_id: context.truth.manifest().snapshot_id().clone(),
+            catalog: context.pack.capability_catalog_identity().clone(),
+            adapter: context.pack.behavior_adapter().clone(),
+            behavior_sha256: behavior.behavior_sha256.clone(),
+            rendered_bundle_sha256: hash_json(&bundle)
+                .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?,
+            bundle,
+        };
+        mutate_graph(graph, graphs, |graph| {
+            graph.replace_checkpoint_with_request(
+                &item.render_node_id,
+                run_id,
+                behavior.behavior_sha256,
+                VersionedPayload::from_typed(render_checkpoint_schema(), &render_checkpoint)
+                    .map_err(|_| ats_runtime::ExecutionGraphError::InvalidMetadata)?,
+                Utc::now(),
+            )
+        })?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     async fn publish_staged<C, I, R, W, S, V, A, B, P, G, RR>(
         &self,
         dependencies: CompositionGenerateDependencies<'_, C, I, R, W, S, V, A, B, P>,
@@ -954,7 +1195,7 @@ impl CompositionGenerateService<'_> {
         context: &CompositionGenerateContext<'_>,
         resolved: &ResolvedItemGraph,
         pipeline: &ResolvedPipelineGraph,
-        proposals: Vec<SingleGenerateCompositionProposal>,
+        provenance: Vec<CompositionBehaviorProvenance>,
         generated_writes: Vec<ProjectFileWrite>,
         generated_artifact_files: Vec<ProposedArtifactFile>,
         finalize: StagedFinalizeCheckpoint,
@@ -974,63 +1215,32 @@ impl CompositionGenerateService<'_> {
         RR: RunRepository + ?Sized,
     {
         let (_, _, delivery, _) = compile_generation_nodes(pipeline, resolved)?;
-        let mut proposals = proposals;
-        let mut generated_writes = generated_writes;
-        let mut generated_artifact_files = generated_artifact_files;
-        let mut finalize = finalize;
-        let (stage, stage_root) = loop {
-            if graph.status() == ExecutionGraphStatus::Repairing
-                && graph.repair_campaign().is_some_and(|campaign| {
-                    usize::try_from(campaign.current_target)
-                        .is_ok_and(|current| current < campaign.targets.len())
-                })
-            {
-                let repaired = self
-                    .repair_rejected_validation(
-                        dependencies.model,
-                        dependencies.resources,
-                        runs,
-                        graphs,
-                        graph,
-                        run.id(),
-                        request,
-                        context,
-                        resolved,
-                        &proposals,
-                        &[],
-                        cancellation,
-                    )
-                    .await?;
-                proposals = repaired.0;
-                generated_writes = repaired.1;
-                generated_artifact_files = repaired.2;
-                finalize = repaired.3;
-                continue;
-            }
-            if graph.status() == ExecutionGraphStatus::Running
-                || graph.status() == ExecutionGraphStatus::Repairing
-            {
-                mutate_graph(graph, graphs, |graph| {
-                    graph.begin_validation(run.id(), Utc::now())
-                })?;
-            }
-            let stage = dependencies.stager.stage(ProjectStageRequest {
-                project_root: context.project_root.to_path_buf(),
-                run_id: run.id().clone(),
+        if graph.status() == ExecutionGraphStatus::Repairing
+            && graph.repair_campaign().is_some_and(|campaign| {
+                usize::try_from(campaign.current_target)
+                    .is_ok_and(|current| current < campaign.targets.len())
+            })
+        {
+            return Err(CompositionGenerateError::InvalidCheckpoint);
+        }
+        if graph.status() == ExecutionGraphStatus::Running
+            || graph.status() == ExecutionGraphStatus::Repairing
+        {
+            mutate_graph(graph, graphs, |graph| {
+                graph.begin_validation(run.id(), Utc::now())
             })?;
-            let stage_root = stage.root().to_path_buf();
-            let staged_writes =
-                dependencies
-                    .writer
-                    .apply(&stage_root, run.id(), generated_writes.clone())?;
-            staged_writes.commit()?;
-            let Some((_, validation_primitive)) = &delivery.validation else {
-                if finalize.validation_primitive.is_some() {
-                    stage.cleanup()?;
-                    return Err(CompositionGenerateError::ValidationPrimitiveMismatch);
-                }
-                break (stage, stage_root);
-            };
+        }
+        let stage = dependencies.stager.stage(ProjectStageRequest {
+            project_root: context.project_root.to_path_buf(),
+            run_id: run.id().clone(),
+        })?;
+        let stage_root = stage.root().to_path_buf();
+        let staged_writes =
+            dependencies
+                .writer
+                .apply(&stage_root, run.id(), generated_writes.clone())?;
+        staged_writes.commit()?;
+        if let Some((_, validation_primitive)) = &delivery.validation {
             if finalize.validation_primitive.as_ref() != Some(validation_primitive) {
                 stage.cleanup()?;
                 return Err(CompositionGenerateError::ValidationPrimitiveMismatch);
@@ -1047,37 +1257,21 @@ impl CompositionGenerateService<'_> {
                 )
                 .await
             {
-                Ok(_) => break (stage, stage_root),
+                Ok(_) => {}
                 Err(ValidationError::Rejected(report)) => {
                     stage.cleanup()?;
-                    let repaired = self
-                        .repair_rejected_validation(
-                            dependencies.model,
-                            dependencies.resources,
-                            runs,
-                            graphs,
-                            graph,
-                            run.id(),
-                            request,
-                            context,
-                            resolved,
-                            &proposals,
-                            &report.issues,
-                            cancellation,
-                        )
-                        .await?;
-                    proposals = repaired.0;
-                    generated_writes = repaired.1;
-                    generated_artifact_files = repaired.2;
-                    finalize = repaired.3;
+                    pause_validation_graph(graph, graphs, run.id(), "game.adapter_invalid")?;
+                    return Err(ValidationError::Rejected(report).into());
                 }
                 Err(error) => {
                     stage.cleanup()?;
                     return Err(error.into());
                 }
             }
-            check_cancelled(cancellation)?;
-        };
+        } else if finalize.validation_primitive.is_some() {
+            stage.cleanup()?;
+            return Err(CompositionGenerateError::ValidationPrimitiveMismatch);
+        }
         check_cancelled(cancellation)?;
         let publication = StagedPublicationIntent {
             execution_graph_id: graph.id().clone(),
@@ -1229,10 +1423,9 @@ impl CompositionGenerateService<'_> {
             return Err(error.into());
         }
 
-        let mut child_run_ids = Vec::with_capacity(finalize.items.len() * 2 + 2);
+        let mut child_run_ids = Vec::with_capacity(finalize.items.len() + 2);
         for item in &finalize.items {
             child_run_ids.push(item.plan_run_id.clone());
-            child_run_ids.push(item.generation_run_id.clone());
         }
         child_run_ids.extend(build_run_id.iter().cloned());
         child_run_ids.extend(package_run_id.iter().cloned());
@@ -1257,7 +1450,7 @@ impl CompositionGenerateService<'_> {
             context,
             run,
             resolved,
-            &proposals,
+            &provenance,
             &generated_artifact_files,
             &extension,
         )?;
@@ -1300,444 +1493,6 @@ impl CompositionGenerateService<'_> {
         succeed_parent(run, &result)?;
         Ok(result)
     }
-
-    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
-    async fn repair_rejected_validation<C, R, RR, G>(
-        &self,
-        model: &C,
-        resources: &R,
-        runs: &RR,
-        graphs: &G,
-        graph: &mut ExecutionGraphRecord,
-        run_id: &RunId,
-        request: &CompositionGenerateRequest,
-        context: &CompositionGenerateContext<'_>,
-        resolved: &ResolvedItemGraph,
-        current_proposals: &[SingleGenerateCompositionProposal],
-        issues: &[ats_runtime::ValidationIssue],
-        cancellation: &CancellationToken,
-    ) -> Result<
-        (
-            Vec<SingleGenerateCompositionProposal>,
-            Vec<ProjectFileWrite>,
-            Vec<ProposedArtifactFile>,
-            StagedFinalizeCheckpoint,
-        ),
-        CompositionGenerateError,
-    >
-    where
-        C: ModelClient + ?Sized,
-        R: ResourceRepository + ?Sized,
-        RR: RunRepository + ?Sized,
-        G: ExecutionGraphRepository + ?Sized,
-    {
-        let blueprint: StagedCompositionGenerateBlueprint = graph
-            .blueprint()
-            .payload
-            .decode(&blueprint_schema())
-            .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-        if graph.repair_campaign().is_none() {
-            let Some(targets) = repair_targets(current_proposals, issues)? else {
-                pause_validation_graph(graph, graphs, run_id, "validation.not_repairable")?;
-                return Err(rejected_validation(issues));
-            };
-            if !request
-                .repair_policy
-                .permits(graph.semantic_request_count())
-            {
-                pause_validation_graph(graph, graphs, run_id, "validation.repair_limit")?;
-                return Err(rejected_validation(issues));
-            }
-            let mut specs = Vec::with_capacity(targets.len());
-            for (item_index, owned_issues) in targets {
-                let item = blueprint
-                    .items
-                    .get(item_index)
-                    .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
-                let checkpoint_hash = graph.nodes()[&item.single_node_id]
-                    .active_checkpoint
-                    .as_ref()
-                    .ok_or(CompositionGenerateError::InvalidCheckpoint)?
-                    .sha256
-                    .clone();
-                specs.push(ExecutionRepairTargetSpec {
-                    item_id: item.item_id.clone(),
-                    node_id: item.single_node_id.clone(),
-                    checkpoint_hash,
-                    diagnostic_fingerprints: owned_issues
-                        .iter()
-                        .map(|issue| issue.fingerprint.clone())
-                        .collect(),
-                    feedback: VersionedPayload::from_typed(
-                        generation_feedback_schema(),
-                        &GenerationFeedbackEnvelope::generated_content(&owned_issues),
-                    )?,
-                });
-            }
-            let validation_fingerprint = diagnostic_fingerprint(issues)?;
-            mutate_graph(graph, graphs, |graph| {
-                graph.begin_repair_campaign(run_id, validation_fingerprint, specs, None, Utc::now())
-            })?;
-        }
-
-        loop {
-            let campaign = graph
-                .repair_campaign()
-                .cloned()
-                .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
-            let target_index = usize::try_from(campaign.current_target)
-                .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-            for completed in campaign.targets.iter().take(target_index) {
-                let item_index = blueprint
-                    .items
-                    .iter()
-                    .position(|item| item.single_node_id == completed.node_id)
-                    .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
-                let checkpoint = decode_single_checkpoint(
-                    graph,
-                    &blueprint.items[item_index],
-                    &resolved.nodes[item_index],
-                )?;
-                persist_child(runs, &checkpoint.child_run)?;
-            }
-            let Some(target) = campaign.targets.get(target_index) else {
-                break;
-            };
-            if !request
-                .repair_policy
-                .permits(graph.semantic_request_count())
-            {
-                pause_validation_graph(graph, graphs, run_id, "validation.repair_limit")?;
-                return Err(rejected_validation(issues));
-            }
-            let item_index = blueprint
-                .items
-                .iter()
-                .position(|item| {
-                    item.item_id == target.item_id && item.single_node_id == target.node_id
-                })
-                .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
-            let item = &blueprint.items[item_index];
-            let definition = &resolved.nodes[item_index];
-            let revision = if campaign.adjustment.is_some() {
-                let adjustment: ItemAdjustment = target
-                    .feedback
-                    .payload
-                    .decode(&item_adjustment_schema())
-                    .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-                adjustment.validate()?;
-                if request.adjustment.as_ref() != Some(&adjustment)
-                    || adjustment.item_id != target.item_id
-                    || adjustment.expected_definition_hash
-                        != resolved.nodes[item_index].definition_hash
-                {
-                    return Err(CompositionGenerateError::AdjustmentStale);
-                }
-                CampaignRevision::Adjustment(adjustment)
-            } else {
-                let feedback: GenerationFeedbackEnvelope = target
-                    .feedback
-                    .payload
-                    .decode(&generation_feedback_schema())
-                    .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-                if !feedback.is_valid()
-                    || feedback.mode != GenerationFeedbackMode::ReplaceCompleteRoles
-                    || feedback.validation_issues.is_empty()
-                {
-                    return Err(CompositionGenerateError::InvalidCheckpoint);
-                }
-                CampaignRevision::GeneratedContent(feedback)
-            };
-            let plan = decode_plan_checkpoint(graph, item, definition)?;
-            let current = decode_single_checkpoint(graph, item, definition)?;
-            let single_request = SingleGenerateRequest {
-                artifact_id: definition.definition.item_id.to_string(),
-                mod_id: request.mod_id.clone(),
-                plan: plan.plan,
-                definition: definition.clone(),
-            };
-            let peer_proposals = restore_peer_proposals(
-                self, resources, request, context, resolved, &blueprint, graph, item_index,
-            )?;
-            mutate_graph(graph, graphs, |graph| {
-                graph.activate_repair_target(run_id, Utc::now())
-            })?;
-            let (proposal, mut child_run) = self
-                .run_campaign_revision_feedback(
-                    model,
-                    resources,
-                    runs,
-                    graphs,
-                    graph,
-                    run_id,
-                    request,
-                    context,
-                    blueprint.model_request_limits,
-                    item,
-                    target.checkpoint_hash.clone(),
-                    &single_request,
-                    &current.proposal.files,
-                    &revision,
-                    &peer_proposals,
-                    cancellation,
-                )
-                .await?;
-            if proposal.checkpoint().files == current.proposal.files {
-                pause_after_unchanged_repair(
-                    runs,
-                    graphs,
-                    graph,
-                    run_id,
-                    &mut child_run,
-                    cancellation,
-                )?;
-                return Err(match &revision {
-                    CampaignRevision::GeneratedContent(feedback) => {
-                        rejected_validation(&feedback.validation_issues)
-                    }
-                    CampaignRevision::Adjustment(_) => CompositionGenerateError::AdjustmentInvalid,
-                });
-            }
-            succeed_child::<SingleGenerateFeature, _>(&mut child_run, &proposal.result)?;
-            let replacement = StagedSingleCheckpoint {
-                proposal: proposal.checkpoint(),
-                child_run,
-            };
-            mutate_graph(graph, graphs, |graph| {
-                graph.complete_repair_target(
-                    &item.single_node_id,
-                    run_id,
-                    VersionedPayload::from_typed(single_checkpoint_schema(), &replacement)
-                        .map_err(|_| ats_runtime::ExecutionGraphError::InvalidMetadata)?,
-                    Utc::now(),
-                )
-            })?;
-            if let Err(error) = persist_child(runs, &replacement.child_run) {
-                pause_validation_graph(graph, graphs, run_id, "run.storage_failed")?;
-                return Err(error);
-            }
-        }
-        let restored = restore_proposals(
-            self, resources, request, context, resolved, &blueprint, graph, runs,
-        );
-        let (proposals, item_results) = match restored {
-            Ok(value) => value,
-            Err(error) => {
-                pause_validation_graph(graph, graphs, run_id, "validation.repair_restore")?;
-                return Err(error);
-            }
-        };
-        let validation_primitive = proposals
-            .first()
-            .map(|proposal| proposal.result.validation_primitive.clone())
-            .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
-        let (writes, files) = consolidate_proposed_files(&proposals)?;
-        let finalize = StagedFinalizeCheckpoint {
-            graph_digest: resolved.graph_digest.clone(),
-            validation_primitive: Some(validation_primitive),
-            generated_file_count: u32::try_from(files.len())
-                .map_err(|_| CompositionGenerateError::InvalidInput)?,
-            items: item_results,
-        };
-        mutate_graph(graph, graphs, |graph| {
-            graph.replace_checkpoint(
-                blueprint.prepare.output_node_id(),
-                run_id,
-                VersionedPayload::from_typed(finalize_checkpoint_schema(), &finalize)
-                    .map_err(|_| ats_runtime::ExecutionGraphError::InvalidMetadata)?,
-                Utc::now(),
-            )
-        })?;
-        Ok((proposals, writes, files, finalize))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn run_campaign_revision_feedback<C, R, RR, G>(
-        &self,
-        model: &C,
-        resources: &R,
-        runs: &RR,
-        graphs: &G,
-        graph: &mut ExecutionGraphRecord,
-        run_id: &RunId,
-        request: &CompositionGenerateRequest,
-        context: &CompositionGenerateContext<'_>,
-        model_request_limits: ats_runtime::ModelRequestLimits,
-        item: &StagedCompositionGenerateItem,
-        checkpoint_hash: Sha256Digest,
-        single_request: &SingleGenerateRequest,
-        current_files: &BTreeMap<String, String>,
-        revision: &CampaignRevision,
-        peer_proposals: &[SingleGenerateCompositionProposal],
-        cancellation: &CancellationToken,
-    ) -> Result<
-        (
-            crate::mod_generate_single::SingleGenerateProposal,
-            RunRecord,
-        ),
-        CompositionGenerateError,
-    >
-    where
-        C: ModelClient + ?Sized,
-        R: ResourceRepository + ?Sized,
-        RR: RunRepository + ?Sized,
-        G: ExecutionGraphRepository + ?Sized,
-    {
-        loop {
-            let output_feedback = graph.nodes()[&item.single_node_id]
-                .feedback_state
-                .as_ref()
-                .filter(|state| {
-                    state.phase == ats_runtime::ExecutionFeedbackPhase::OutputContract
-                        && state.checkpoint_hash.as_ref() == Some(&checkpoint_hash)
-                })
-                .map(|state| {
-                    state
-                        .feedback
-                        .payload
-                        .decode::<GenerationFeedbackEnvelope>(&generation_feedback_schema())
-                })
-                .transpose()
-                .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-            if output_feedback
-                .as_ref()
-                .is_some_and(|feedback| match revision {
-                    CampaignRevision::GeneratedContent(generated) => {
-                        !feedback.is_valid()
-                            || feedback.mode != GenerationFeedbackMode::ReplaceCompleteRoles
-                            || feedback.validation_issues != generated.validation_issues
-                    }
-                    CampaignRevision::Adjustment(_) => {
-                        !feedback.is_valid()
-                            || feedback.mode != GenerationFeedbackMode::RegenerateCompleteBundle
-                    }
-                })
-            {
-                return Err(CompositionGenerateError::InvalidCheckpoint);
-            }
-            let mut child_run = running_run::<SingleGenerateFeature, _>(single_request)?;
-            let revision_request = match revision {
-                CampaignRevision::GeneratedContent(generated) => {
-                    SingleRevisionRequest::GeneratedContent {
-                        current_files: current_files.clone(),
-                        issues: generated.validation_issues.clone(),
-                        output_feedback,
-                    }
-                }
-                CampaignRevision::Adjustment(adjustment) => {
-                    SingleRevisionRequest::OperatorAdjustment {
-                        current_files: current_files.clone(),
-                        instruction: adjustment.instruction.clone(),
-                        output_feedback,
-                    }
-                }
-            };
-            let generated = self
-                .single
-                .revision_propose(
-                    SingleProposalDependencies { model, resources },
-                    &child_run,
-                    single_request,
-                    &single_context(context, model_request_limits),
-                    &revision_request,
-                    cancellation,
-                )
-                .await;
-            let generated = match generated {
-                Ok(proposal) => match validate_next_proposal_merge_claims(
-                    peer_proposals,
-                    &proposal.composition_proposal(),
-                ) {
-                    Ok(()) => Ok(proposal),
-                    Err(NextProposalMergeConflict::DuplicateKey { role }) => {
-                        Err(proposal.merge_key_conflict_error(role))
-                    }
-                    Err(NextProposalMergeConflict::Contract) => {
-                        let error = CompositionGenerateError::GeneratedFileConflict;
-                        finish_failed_child(&mut child_run, error.run_failure(), cancellation)?;
-                        if let Err(storage_error) = persist_child(runs, &child_run) {
-                            pause_validation_graph(graph, graphs, run_id, "run.storage_failed")?;
-                            return Err(storage_error);
-                        }
-                        pause_validation_graph(graph, graphs, run_id, "validation.repair_failed")?;
-                        return Err(error);
-                    }
-                },
-                Err(error) => Err(error),
-            };
-            match generated {
-                Ok(proposal) => return Ok((proposal, child_run)),
-                Err(error) => {
-                    finish_failed_child(&mut child_run, error.run_failure(), cancellation)?;
-                    if let Err(storage_error) = persist_child(runs, &child_run) {
-                        pause_validation_graph(graph, graphs, run_id, "run.storage_failed")?;
-                        return Err(storage_error);
-                    }
-                    if cancellation.is_cancelled() {
-                        return handle_cancellation(graph, graphs, run_id, cancellation)
-                            .and(Err(CompositionGenerateError::Cancelled));
-                    }
-                    let Some(evidence) = error.output_feedback().cloned() else {
-                        pause_validation_graph(graph, graphs, run_id, "validation.repair_failed")?;
-                        return Err(error.into());
-                    };
-                    if !request
-                        .repair_policy
-                        .permits(graph.semantic_request_count())
-                    {
-                        pause_validation_graph(graph, graphs, run_id, "model.feedback_exhausted")?;
-                        return Err(error.into());
-                    }
-                    let envelope = match revision {
-                        CampaignRevision::GeneratedContent(generated) => {
-                            GenerationFeedbackEnvelope::repair_output_contract(
-                                evidence.envelope.output_diagnostics[0].clone(),
-                                &generated.validation_issues,
-                            )
-                        }
-                        CampaignRevision::Adjustment(_) => evidence.envelope,
-                    };
-                    let fingerprint = feedback_fingerprint(&envelope)
-                        .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-                    if graph.nodes()[&item.single_node_id]
-                        .feedback_state
-                        .as_ref()
-                        .is_some_and(|state| {
-                            state.diagnostic_fingerprint == fingerprint
-                                && state.candidate_sha256.as_ref()
-                                    == Some(&evidence.candidate_sha256)
-                                && state.checkpoint_hash.as_ref() == Some(&checkpoint_hash)
-                        })
-                    {
-                        pause_validation_graph(
-                            graph,
-                            graphs,
-                            run_id,
-                            "model.feedback_no_progress",
-                        )?;
-                        return Err(error.into());
-                    }
-                    mutate_graph(graph, graphs, |graph| {
-                        graph.record_repair_output_feedback(
-                            &item.single_node_id,
-                            run_id,
-                            checkpoint_hash.clone(),
-                            ats_runtime::ExecutionOutputFeedback {
-                                diagnostic_fingerprint: fingerprint,
-                                candidate_sha256: evidence.candidate_sha256,
-                                feedback: VersionedPayload::from_typed(
-                                    generation_feedback_schema(),
-                                    &envelope,
-                                )
-                                .map_err(|_| ats_runtime::ExecutionGraphError::InvalidMetadata)?,
-                            },
-                            Utc::now(),
-                        )
-                    })?;
-                }
-            }
-        }
-    }
 }
 
 impl StagedCompositionGenerateBlueprint {
@@ -1750,7 +1505,7 @@ impl StagedCompositionGenerateBlueprint {
             .composition_contributions
             .decode(&generation_slot())?;
         pipelines.validate_resolved(&contribution.pipeline, &self.pipeline)?;
-        if self.schema_version != 7
+        if self.schema_version != 8
             || self.game_pack_id != *context.pack.id()
             || self.game_pack_sha256 != *context.pack.content_sha256()
             || self.truth_snapshot_id != *context.truth.manifest().snapshot_id()
@@ -1937,7 +1692,8 @@ fn compile_generation_nodes(
 fn execution_role_id(primitive_id: &str) -> &str {
     match primitive_id {
         "feature.mod-plan" => "mod.plan",
-        "feature.mod-generate-single" => "mod.generate.single",
+        "feature.composition-behavior" => "composition.behavior",
+        "game.behavior-render" => "composition.render",
         "feature.composition-finalize" => "composition.finalize",
         other => other,
     }
@@ -1964,23 +1720,28 @@ fn compile_item_generation_prepare(
             matches.next().is_none().then_some(node)
         };
         let plan = find("feature.mod-plan")?;
-        let single = find("feature.mod-generate-single")?;
+        let behavior = find("feature.composition-behavior")?;
+        let render = find("game.behavior-render")?;
         if plan.checkpoint_policy != PipelineCheckpointPolicy::OnSuccess
-            || single.checkpoint_policy != PipelineCheckpointPolicy::OnSuccess
+            || behavior.checkpoint_policy != PipelineCheckpointPolicy::OnSuccess
+            || render.checkpoint_policy != PipelineCheckpointPolicy::OnSuccess
             || plan.produces.schema != plan_checkpoint_schema()
-            || single.produces.schema != single_checkpoint_schema()
+            || behavior.produces.schema != behavior_checkpoint_schema()
+            || render.produces.schema != render_checkpoint_schema()
             || !claimed.insert(plan.node_id.clone())
-            || !claimed.insert(single.node_id.clone())
+            || !claimed.insert(behavior.node_id.clone())
+            || !claimed.insert(render.node_id.clone())
         {
             return None;
         }
         let valid_binding = match (&delivery.validation, validation_nodes.first()) {
             (Some((_, primitive)), Some(validation)) => {
-                single.validation.len() == 1
-                    && single.validation[0].id == *primitive
-                    && single.validation[0].version == validation.primitive_version
+                behavior.validation.is_empty()
+                    && render.validation.len() == 1
+                    && render.validation[0].id == *primitive
+                    && render.validation[0].version == validation.primitive_version
             }
-            (None, None) => single.validation.is_empty(),
+            (None, None) => behavior.validation.is_empty() && render.validation.is_empty(),
             _ => false,
         };
         if !valid_binding {
@@ -1990,7 +1751,8 @@ fn compile_item_generation_prepare(
             item_id: item_id.clone(),
             definition_hash: definition.definition_hash.clone(),
             plan_node_id: plan.node_id.clone(),
-            single_node_id: single.node_id.clone(),
+            behavior_node_id: behavior.node_id.clone(),
+            render_node_id: render.node_id.clone(),
         });
     }
 
@@ -2070,98 +1832,160 @@ fn render_data_json(resolved: &ResolvedItemGraph) -> PreparedCompositionAssembly
     ))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn restore_proposals<R, RR>(
-    service: &CompositionGenerateService<'_>,
-    resources: &R,
-    request: &CompositionGenerateRequest,
+fn restore_rendered_assembly<R: RunRepository + ?Sized>(
     context: &CompositionGenerateContext<'_>,
     resolved: &ResolvedItemGraph,
     blueprint: &StagedCompositionGenerateBlueprint,
     graph: &ExecutionGraphRecord,
-    runs: &RR,
-) -> Result<
-    (
-        Vec<SingleGenerateCompositionProposal>,
-        Vec<CompositionItemRunResult>,
-    ),
-    CompositionGenerateError,
->
-where
-    R: ResourceRepository + ?Sized,
-    RR: RunRepository + ?Sized,
-{
-    let mut proposals = Vec::with_capacity(blueprint.items.len());
-    let mut results = Vec::with_capacity(blueprint.items.len());
+    runs: &R,
+) -> PreparedCompositionAssembly {
+    let (_, _, delivery, _) = compile_generation_nodes(&blueprint.pipeline, resolved)?;
+    let validation_primitive = delivery
+        .validation
+        .map(|(_, primitive)| primitive)
+        .ok_or(CompositionGenerateError::ValidationPrimitiveMismatch)?;
+    let mut provenance = Vec::with_capacity(blueprint.items.len());
+    let mut writes = Vec::new();
+    let mut artifact_files = Vec::new();
+    let mut paths = BTreeSet::new();
+    let mut item_results = Vec::with_capacity(blueprint.items.len());
+
     for (item, definition) in blueprint.items.iter().zip(&resolved.nodes) {
         let plan = decode_plan_checkpoint(graph, item, definition)?;
-        let single = decode_single_checkpoint(graph, item, definition)?;
         persist_child(runs, &plan.child_run)?;
-        persist_child(runs, &single.child_run)?;
-        let single_request = SingleGenerateRequest {
-            artifact_id: definition.definition.item_id.to_string(),
-            mod_id: request.mod_id.clone(),
-            plan: plan.plan,
-            definition: definition.clone(),
-        };
-        let proposal = service.single.restore_composition_proposal(
-            resources,
-            &single_request,
-            &single_context(context, blueprint.model_request_limits),
-            &single.proposal,
-        )?;
-        validate_next_proposal_merge_claims(&proposals, &proposal)
-            .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-        results.push(CompositionItemRunResult {
+        let behavior = decode_behavior_checkpoint(graph, item, definition, context)?;
+        let render = decode_render_checkpoint(graph, item, definition, &behavior, context)?;
+        for file in &render.bundle.files {
+            if !paths.insert(file.relative_path.clone()) {
+                return Err(CompositionGenerateError::RenderedFileConflict);
+            }
+            writes.push(ProjectFileWrite::new(
+                file.relative_path.clone(),
+                file.bytes.clone(),
+            )?);
+            artifact_files.push(ProposedArtifactFile {
+                role: file.role.clone(),
+                relative_path: file.relative_path.clone(),
+                composition_merge: None,
+                composition_merge_key_policy: None,
+            });
+        }
+        provenance.push(CompositionBehaviorProvenance {
+            item_id: definition.definition.item_id.clone(),
+            definition_hash: definition.definition_hash.clone(),
+            pack_id: behavior.pack_id.clone(),
+            pack_sha256: behavior.pack_sha256.clone(),
+            truth_snapshot_id: behavior.truth_snapshot_id.clone(),
+            catalog: behavior.catalog.clone(),
+            adapter: behavior.adapter.clone(),
+            model_request_sha256: behavior.request_snapshot.request_sha256().clone(),
+            behavior_sha256: behavior.behavior_sha256.clone(),
+            rendered_bundle_sha256: render.rendered_bundle_sha256.clone(),
+            model: behavior.response_model.clone(),
+            usage: behavior.usage.clone(),
+        });
+        item_results.push(CompositionItemRunResult {
             item_id: definition.definition.item_id.clone(),
             definition_hash: definition.definition_hash.clone(),
             plan_run_id: plan.child_run.id().clone(),
-            generation_run_id: single.child_run.id().clone(),
-            generation: proposal.result.clone(),
+            behavior_request_sha256: behavior.request_snapshot.request_sha256().clone(),
+            behavior_sha256: behavior.behavior_sha256,
+            rendered_bundle_sha256: render.rendered_bundle_sha256,
+            adapter: behavior.adapter,
+            generated_file_count: u32::try_from(render.bundle.files.len())
+                .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?,
         });
-        proposals.push(proposal);
     }
-    Ok((proposals, results))
+    ats_runtime::validate_project_writes(&writes)?;
+    let finalize = StagedFinalizeCheckpoint {
+        graph_digest: resolved.graph_digest.clone(),
+        validation_primitive: Some(validation_primitive),
+        generated_file_count: u32::try_from(artifact_files.len())
+            .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?,
+        items: item_results,
+    };
+    Ok((provenance, writes, artifact_files, finalize))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn restore_peer_proposals<R>(
-    service: &CompositionGenerateService<'_>,
-    resources: &R,
-    request: &CompositionGenerateRequest,
-    context: &CompositionGenerateContext<'_>,
-    resolved: &ResolvedItemGraph,
-    blueprint: &StagedCompositionGenerateBlueprint,
+fn decode_behavior_checkpoint(
     graph: &ExecutionGraphRecord,
-    excluded_index: usize,
-) -> Result<Vec<SingleGenerateCompositionProposal>, CompositionGenerateError>
-where
-    R: ResourceRepository + ?Sized,
-{
-    let mut proposals = Vec::with_capacity(blueprint.items.len().saturating_sub(1));
-    for (index, (item, definition)) in blueprint.items.iter().zip(&resolved.nodes).enumerate() {
-        if index == excluded_index {
-            continue;
-        }
-        let plan = decode_plan_checkpoint(graph, item, definition)?;
-        let single = decode_single_checkpoint(graph, item, definition)?;
-        let single_request = SingleGenerateRequest {
-            artifact_id: definition.definition.item_id.to_string(),
-            mod_id: request.mod_id.clone(),
-            plan: plan.plan,
-            definition: definition.clone(),
-        };
-        let proposal = service.single.restore_composition_proposal(
-            resources,
-            &single_request,
-            &single_context(context, blueprint.model_request_limits),
-            &single.proposal,
-        )?;
-        validate_next_proposal_merge_claims(&proposals, &proposal)
-            .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-        proposals.push(proposal);
+    item: &StagedCompositionGenerateItem,
+    definition: &StoredItemDefinition,
+    context: &CompositionGenerateContext<'_>,
+) -> Result<StagedBehaviorCheckpoint, CompositionGenerateError> {
+    let checkpoint: StagedBehaviorCheckpoint =
+        decode_checkpoint(graph, &item.behavior_node_id, &behavior_checkpoint_schema())?;
+    let node = graph
+        .nodes()
+        .get(&item.behavior_node_id)
+        .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
+    checkpoint
+        .request_snapshot
+        .verify()
+        .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+    checkpoint
+        .proposal
+        .validate(context.pack.capability_catalog())
+        .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+    if checkpoint.pack_id != *context.pack.id()
+        || checkpoint.pack_sha256 != *context.pack.content_sha256()
+        || checkpoint.truth_snapshot_id != *context.truth.manifest().snapshot_id()
+        || checkpoint.catalog != *context.pack.capability_catalog_identity()
+        || checkpoint.adapter != *context.pack.behavior_adapter()
+        || checkpoint.definition_hash != definition.definition_hash
+        || checkpoint.proposal.item_id != definition.definition.item_id
+        || checkpoint.proposal.item_type != definition.definition.item_type
+        || checkpoint.proposal.definition_hash != definition.definition_hash
+        || checkpoint.proposal.catalog != checkpoint.catalog
+        || checkpoint.proposal.adapter != checkpoint.adapter
+        || checkpoint.proposal.sha256().ok().as_ref() != Some(&checkpoint.behavior_sha256)
+        || checkpoint.request_snapshot.feature_id() != &CompositionGenerateFeature::id()
+        || checkpoint.request_snapshot.game_pack().id != checkpoint.pack_id
+        || checkpoint.request_snapshot.game_pack().sha256 != checkpoint.pack_sha256
+        || checkpoint.request_snapshot.truth_snapshot_id() != Some(&checkpoint.truth_snapshot_id)
+        || checkpoint.request_snapshot.request_sha256() != &node.request_snapshot_hash
+        || checkpoint.response_model.trim().is_empty()
+        || checkpoint.response_model.chars().count() > 256
+        || checkpoint.response_model.contains('\0')
+    {
+        return Err(CompositionGenerateError::InvalidCheckpoint);
     }
-    Ok(proposals)
+    Ok(checkpoint)
+}
+
+fn decode_render_checkpoint(
+    graph: &ExecutionGraphRecord,
+    item: &StagedCompositionGenerateItem,
+    definition: &StoredItemDefinition,
+    behavior: &StagedBehaviorCheckpoint,
+    context: &CompositionGenerateContext<'_>,
+) -> Result<StagedRenderCheckpoint, CompositionGenerateError> {
+    let checkpoint: StagedRenderCheckpoint =
+        decode_checkpoint(graph, &item.render_node_id, &render_checkpoint_schema())?;
+    let node = graph
+        .nodes()
+        .get(&item.render_node_id)
+        .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
+    checkpoint
+        .bundle
+        .validate_for(&behavior.proposal)
+        .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+    if checkpoint.pack_id != *context.pack.id()
+        || checkpoint.pack_sha256 != *context.pack.content_sha256()
+        || checkpoint.truth_snapshot_id != *context.truth.manifest().snapshot_id()
+        || checkpoint.catalog != *context.pack.capability_catalog_identity()
+        || checkpoint.adapter != *context.pack.behavior_adapter()
+        || checkpoint.bundle.item_id != definition.definition.item_id
+        || checkpoint.bundle.definition_hash != definition.definition_hash
+        || checkpoint.behavior_sha256 != behavior.behavior_sha256
+        || checkpoint.bundle.behavior_sha256 != behavior.behavior_sha256
+        || checkpoint.bundle.adapter != behavior.adapter
+        || hash_json(&checkpoint.bundle).ok().as_ref() != Some(&checkpoint.rendered_bundle_sha256)
+        || node.request_snapshot_hash != behavior.behavior_sha256
+    {
+        return Err(CompositionGenerateError::InvalidCheckpoint);
+    }
+    Ok(checkpoint)
 }
 
 fn decode_plan_checkpoint(
@@ -2182,29 +2006,6 @@ fn decode_plan_checkpoint(
         || result != checkpoint.plan
         || checkpoint.plan.item_id != definition.definition.item_id.as_str()
         || checkpoint.plan.item_type != definition.definition.item_type.as_str()
-    {
-        return Err(CompositionGenerateError::InvalidCheckpoint);
-    }
-    Ok(checkpoint)
-}
-
-fn decode_single_checkpoint(
-    graph: &ExecutionGraphRecord,
-    item: &StagedCompositionGenerateItem,
-    definition: &StoredItemDefinition,
-) -> Result<StagedSingleCheckpoint, CompositionGenerateError> {
-    let checkpoint: StagedSingleCheckpoint =
-        decode_checkpoint(graph, &item.single_node_id, &single_checkpoint_schema())?;
-    let result = checkpoint
-        .child_run
-        .result()
-        .ok_or(CompositionGenerateError::InvalidCheckpoint)?
-        .decode::<SingleGenerateResult>(&SingleGenerateFeature::result_schema())
-        .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-    if checkpoint.child_run.feature_id() != &SingleGenerateFeature::id()
-        || checkpoint.child_run.status() != RunStatus::Succeeded
-        || result != checkpoint.proposal.result
-        || checkpoint.proposal.provenance.definition_hash != definition.definition_hash
     {
         return Err(CompositionGenerateError::InvalidCheckpoint);
     }
@@ -2291,98 +2092,6 @@ fn validate_publication_intent(
     Ok(())
 }
 
-fn single_context<'a>(
-    context: &'a CompositionGenerateContext<'a>,
-    model_request_limits: ats_runtime::ModelRequestLimits,
-) -> SingleGenerateContext<'a> {
-    SingleGenerateContext {
-        pack: context.pack,
-        contributions: context.single_contributions,
-        resource_contributions: context.resource_contributions,
-        truth: context.truth,
-        project_root: context.project_root,
-        project_context: context.project_context,
-        custom_instructions: context.custom_instructions,
-        model: context.model.clone(),
-        model_request_limits,
-    }
-}
-
-type RepairTargetIssues = (usize, Vec<ats_runtime::ValidationIssue>);
-
-fn repair_targets(
-    proposals: &[SingleGenerateCompositionProposal],
-    issues: &[ats_runtime::ValidationIssue],
-) -> Result<Option<Vec<RepairTargetIssues>>, CompositionGenerateError> {
-    if issues.is_empty()
-        || issues.iter().any(|issue| {
-            issue.severity == ats_runtime::ValidationIssueSeverity::Error
-                && issue.repairability
-                    != ats_runtime::ValidationIssueRepairability::GeneratedContent
-        })
-    {
-        return Ok(None);
-    }
-    let errors = issues
-        .iter()
-        .filter(|issue| issue.severity == ats_runtime::ValidationIssueSeverity::Error)
-        .collect::<Vec<_>>();
-    if errors.is_empty() {
-        return Ok(None);
-    }
-    let mut grouped = BTreeMap::<usize, Vec<ats_runtime::ValidationIssue>>::new();
-    for issue in errors {
-        let Some(path) = issue.relative_path.as_deref() else {
-            return Ok(None);
-        };
-        let matches = proposals
-            .iter()
-            .enumerate()
-            .filter(|(_, proposal)| {
-                proposal
-                    .artifact_files
-                    .iter()
-                    .any(|file| file.relative_path == path && file.composition_merge.is_none())
-            })
-            .map(|(index, _)| index)
-            .collect::<Vec<_>>();
-        if matches.len() != 1 {
-            return Ok(None);
-        }
-        grouped.entry(matches[0]).or_default().push(issue.clone());
-    }
-    if grouped.is_empty() {
-        return Ok(None);
-    }
-    let mut targets = Vec::with_capacity(grouped.len());
-    for (index, mut owned_issues) in grouped {
-        owned_issues.sort_by(|left, right| left.fingerprint.cmp(&right.fingerprint));
-        owned_issues.dedup_by(|left, right| left.fingerprint == right.fingerprint);
-        targets.push((index, owned_issues));
-    }
-    Ok(Some(targets))
-}
-
-fn rejected_validation(issues: &[ats_runtime::ValidationIssue]) -> CompositionGenerateError {
-    CompositionGenerateError::Validation(ValidationError::Rejected(ats_runtime::ValidationReport {
-        exit_code: 1,
-        stdout_tail: String::new(),
-        stderr_tail: String::new(),
-        issues: issues.to_vec(),
-    }))
-}
-
-fn diagnostic_fingerprint(
-    issues: &[ats_runtime::ValidationIssue],
-) -> Result<Sha256Digest, CompositionGenerateError> {
-    let mut fingerprints = issues
-        .iter()
-        .map(|issue| issue.fingerprint.clone())
-        .collect::<Vec<_>>();
-    fingerprints.sort();
-    hash_json(&fingerprints).map_err(|_| CompositionGenerateError::InvalidCheckpoint)
-}
-
 fn pause_validation_graph<G: ExecutionGraphRepository + ?Sized>(
     graph: &mut ExecutionGraphRecord,
     graphs: &G,
@@ -2399,28 +2108,34 @@ fn pause_validation_graph<G: ExecutionGraphRepository + ?Sized>(
     })
 }
 
-fn pause_after_unchanged_repair<R, G>(
-    runs: &R,
-    graphs: &G,
+fn pause_repair_after_error<G: ExecutionGraphRepository + ?Sized>(
     graph: &mut ExecutionGraphRecord,
+    graphs: &G,
     run_id: &RunId,
-    child_run: &mut RunRecord,
-    cancellation: &CancellationToken,
-) -> Result<(), CompositionGenerateError>
-where
-    R: RunRepository + ?Sized,
-    G: ExecutionGraphRepository + ?Sized,
-{
-    finish_failed_child(
-        child_run,
-        failure("validation.repair_no_change", "composition.generate.repair"),
-        cancellation,
-    )?;
-    if let Err(storage_error) = persist_child(runs, child_run) {
-        pause_validation_graph(graph, graphs, run_id, "run.storage_failed")?;
-        return Err(storage_error);
-    }
-    pause_validation_graph(graph, graphs, run_id, "validation.repair_no_change")
+    error: &CompositionGenerateError,
+) -> Result<(), CompositionGenerateError> {
+    let failure = error.run_failure();
+    let safe = ExecutionFailure::new(failure.code, failure.stage)
+        .map_err(|_| CompositionGenerateError::ExecutionGraphStorage)?;
+    mutate_graph(graph, graphs, |graph| {
+        graph.pause_after_graph_failure(run_id, safe, Utc::now())
+    })
+}
+
+fn pause_repair_with_code<G: ExecutionGraphRepository + ?Sized>(
+    graph: &mut ExecutionGraphRecord,
+    graphs: &G,
+    run_id: &RunId,
+    code: &str,
+) -> Result<(), CompositionGenerateError> {
+    let failure = ExecutionFailure::new(
+        FailureCode::parse(code).map_err(|_| CompositionGenerateError::InvalidCheckpoint)?,
+        "composition.behavior.feedback",
+    )
+    .map_err(|_| CompositionGenerateError::ExecutionGraphStorage)?;
+    mutate_graph(graph, graphs, |graph| {
+        graph.pause_after_graph_failure(run_id, failure, Utc::now())
+    })
 }
 
 fn execution_graph_id(
@@ -2664,7 +2379,7 @@ fn succeed_parent(
 }
 
 fn blueprint_schema() -> SchemaRef {
-    schema_version(BLUEPRINT_SCHEMA_ID, 7)
+    schema_version(BLUEPRINT_SCHEMA_ID, 8)
 }
 
 fn item_adjustment_schema() -> SchemaRef {
@@ -2675,12 +2390,20 @@ fn plan_checkpoint_schema() -> SchemaRef {
     schema(PLAN_CHECKPOINT_SCHEMA_ID)
 }
 
-fn single_checkpoint_schema() -> SchemaRef {
-    schema(SINGLE_CHECKPOINT_SCHEMA_ID)
+fn behavior_checkpoint_schema() -> SchemaRef {
+    schema(BEHAVIOR_CHECKPOINT_SCHEMA_ID)
+}
+
+fn behavior_feedback_schema() -> SchemaRef {
+    schema("feature.composition-behavior-feedback")
+}
+
+fn render_checkpoint_schema() -> SchemaRef {
+    schema(RENDER_CHECKPOINT_SCHEMA_ID)
 }
 
 fn finalize_checkpoint_schema() -> SchemaRef {
-    schema_version(FINALIZE_CHECKPOINT_SCHEMA_ID, 2)
+    schema_version(FINALIZE_CHECKPOINT_SCHEMA_ID, 3)
 }
 
 fn commit_intent_schema() -> SchemaRef {
@@ -2699,16 +2422,7 @@ mod tests {
     use std::sync::Mutex;
 
     use ats_kernel::{ExecutionGraphId, FeatureId};
-    use ats_runtime::{
-        ExecutionGraphRecovery, ExecutionNodeSpec, ModelResourceRef, ProjectFileWrite,
-        RunRepositoryError, RunSummary, TokenUsage, ValidationIssueRepairability,
-        ValidationIssueSeverity,
-    };
-
-    use crate::mod_generate_single::{
-        CompositionFileMerge, CompositionMergeKeyPolicy, ProposedArtifactFile,
-        SingleGeneratePublication, SingleGenerateResult, SingleGenerationProvenance,
-    };
+    use ats_runtime::{ExecutionGraphRecovery, ExecutionNodeSpec, RunRepositoryError, RunSummary};
 
     use super::*;
 
@@ -2727,48 +2441,6 @@ mod tests {
 
         fn list(&self) -> Result<Vec<RunSummary>, RunRepositoryError> {
             Ok(Vec::new())
-        }
-
-        fn persist(&self, _: &RunRecord, _: RunStatus) -> Result<(), RunRepositoryError> {
-            Err(RunRepositoryError::NotFound)
-        }
-
-        fn reconcile_interrupted(&self) -> Result<u32, RunRepositoryError> {
-            Ok(0)
-        }
-    }
-
-    #[derive(Default)]
-    struct MemoryRunRepository(Mutex<Vec<RunRecord>>);
-
-    impl RunRepository for MemoryRunRepository {
-        fn create(&self, run: &RunRecord) -> Result<(), RunRepositoryError> {
-            let mut runs = self.0.lock().unwrap();
-            if runs.iter().any(|existing| existing.id() == run.id()) {
-                return Err(RunRepositoryError::AlreadyExists);
-            }
-            runs.push(run.clone());
-            Ok(())
-        }
-
-        fn get(&self, id: &RunId) -> Result<RunRecord, RunRepositoryError> {
-            self.0
-                .lock()
-                .unwrap()
-                .iter()
-                .find(|run| run.id() == id)
-                .cloned()
-                .ok_or(RunRepositoryError::NotFound)
-        }
-
-        fn list(&self) -> Result<Vec<RunSummary>, RunRepositoryError> {
-            Ok(self
-                .0
-                .lock()
-                .unwrap()
-                .iter()
-                .map(RunSummary::from)
-                .collect())
         }
 
         fn persist(&self, _: &RunRecord, _: RunStatus) -> Result<(), RunRepositoryError> {
@@ -2827,7 +2499,7 @@ mod tests {
     fn child_run_storage_failure_pauses_the_next_ready_node() {
         let parent_run_id = RunId::parse("run-parent").unwrap();
         let first_node = ExecutionNodeId::parse("item.000.plan").unwrap();
-        let next_node = ExecutionNodeId::parse("item.000.single").unwrap();
+        let next_node = ExecutionNodeId::parse("item.000.behavior").unwrap();
         let zero = zero_digest().unwrap();
         let mut graph = ExecutionGraphRecord::new_claimed(
             ExecutionGraphId::parse("graph-fixture").unwrap(),
@@ -2844,7 +2516,7 @@ mod tests {
                 },
                 ExecutionNodeSpec {
                     node_id: next_node.clone(),
-                    role_id: "mod.generate.single".into(),
+                    role_id: "composition.behavior".into(),
                     depends_on: vec![first_node.clone()],
                     request_snapshot_hash: zero,
                 },
@@ -2905,179 +2577,6 @@ mod tests {
     }
 
     #[test]
-    fn repair_targets_rejects_local_shared_and_ambiguous_diagnostics() {
-        let proposals = vec![
-            proposal("Generated/child.cs", None),
-            proposal("Generated/root.cs", None),
-        ];
-        let local = issue(
-            "Generated/child.cs",
-            ValidationIssueRepairability::LocalEnvironment,
-            '1',
-        );
-        assert!(repair_targets(&proposals, &[local]).unwrap().is_none());
-
-        let shared = vec![proposal(
-            "Generated/localization.json",
-            Some(CompositionFileMerge::JsonObject),
-        )];
-        assert!(
-            repair_targets(
-                &shared,
-                &[issue(
-                    "Generated/localization.json",
-                    ValidationIssueRepairability::GeneratedContent,
-                    '2',
-                )],
-            )
-            .unwrap()
-            .is_none()
-        );
-
-        let ambiguous = vec![
-            proposal("Generated/shared.cs", None),
-            proposal("Generated/shared.cs", None),
-        ];
-        assert!(
-            repair_targets(
-                &ambiguous,
-                &[issue(
-                    "Generated/shared.cs",
-                    ValidationIssueRepairability::GeneratedContent,
-                    '3',
-                )],
-            )
-            .unwrap()
-            .is_none()
-        );
-
-        let cross_owner = vec![
-            issue(
-                "Generated/child.cs",
-                ValidationIssueRepairability::GeneratedContent,
-                '4',
-            ),
-            issue(
-                "Generated/root.cs",
-                ValidationIssueRepairability::GeneratedContent,
-                '5',
-            ),
-        ];
-        let targets = repair_targets(&proposals, &cross_owner).unwrap().unwrap();
-        assert_eq!(targets.len(), 2);
-        assert_eq!(targets[0].0, 0);
-        assert_eq!(
-            targets[0].1[0].fingerprint,
-            Sha256Digest::parse("4".repeat(64)).unwrap()
-        );
-        assert_eq!(targets[1].0, 1);
-        assert_eq!(
-            targets[1].1[0].fingerprint,
-            Sha256Digest::parse("5".repeat(64)).unwrap()
-        );
-    }
-
-    #[test]
-    fn repair_targets_returns_only_errors_for_one_non_shared_proposal() {
-        let proposals = vec![proposal("Generated/child.cs", None)];
-        let error = issue(
-            "Generated/child.cs",
-            ValidationIssueRepairability::GeneratedContent,
-            '6',
-        );
-        let mut warning = issue(
-            "Generated/child.cs",
-            ValidationIssueRepairability::GeneratedContent,
-            '7',
-        );
-        warning.severity = ValidationIssueSeverity::Warning;
-
-        let targets = repair_targets(&proposals, &[error.clone(), warning])
-            .unwrap()
-            .unwrap();
-        let (index, owned) = &targets[0];
-        assert_eq!(*index, 0);
-        assert_eq!(owned, &vec![error]);
-    }
-
-    #[test]
-    fn unchanged_repair_persists_failed_child_and_pauses_before_commit() {
-        let parent_run_id = RunId::parse("run-parent-repair").unwrap();
-        let node_id = ExecutionNodeId::parse("item.000.single").unwrap();
-        let zero = zero_digest().unwrap();
-        let mut graph = ExecutionGraphRecord::new_claimed(
-            ExecutionGraphId::parse("graph-repair-fixture").unwrap(),
-            FeatureId::parse("composition.generate").unwrap(),
-            zero.clone(),
-            VersionedPayload::from_typed(blueprint_schema(), &serde_json::json!({"fixture": true}))
-                .unwrap(),
-            vec![ExecutionNodeSpec {
-                node_id: node_id.clone(),
-                role_id: "mod.generate.single".into(),
-                depends_on: Vec::new(),
-                request_snapshot_hash: zero,
-            }],
-            parent_run_id.clone(),
-            Utc::now(),
-        )
-        .unwrap();
-        graph
-            .start_node(&node_id, &parent_run_id, Utc::now())
-            .unwrap();
-        graph
-            .complete_node(
-                &node_id,
-                &parent_run_id,
-                VersionedPayload::from_typed(
-                    single_checkpoint_schema(),
-                    &serde_json::json!({"fixture": true}),
-                )
-                .unwrap(),
-                Utc::now(),
-            )
-            .unwrap();
-        graph.begin_validation(&parent_run_id, Utc::now()).unwrap();
-        let graphs = MemoryGraphRepository(Mutex::new(graph.clone()));
-        let runs = MemoryRunRepository::default();
-        let mut child = RunRecord::new(
-            FeatureId::parse("mod.generate.single").unwrap(),
-            VersionedPayload::from_typed(
-                schema("fixture.request"),
-                &serde_json::json!({"fixture": true}),
-            )
-            .unwrap(),
-        );
-        child
-            .apply_transition(RunTransition::Start, Utc::now())
-            .unwrap();
-
-        pause_after_unchanged_repair(
-            &runs,
-            &graphs,
-            &mut graph,
-            &parent_run_id,
-            &mut child,
-            &CancellationToken::new(),
-        )
-        .unwrap();
-
-        assert_eq!(child.status(), RunStatus::Failed);
-        assert_eq!(
-            child.failure().unwrap().code.as_str(),
-            "validation.repair_no_change"
-        );
-        assert_eq!(runs.get(child.id()).unwrap(), child);
-        assert_eq!(graph.status(), ExecutionGraphStatus::Paused);
-        assert!(graph.active_run_id().is_none());
-        assert!(graph.commit_intent().is_none());
-        assert_eq!(
-            graph.graph_failure().unwrap().code.as_str(),
-            "validation.repair_no_change"
-        );
-        assert_eq!(graphs.get(graph.id()).unwrap(), graph);
-    }
-
-    #[test]
     fn validation_feedback_cancellation_preserves_user_and_pause_semantics() {
         for (reason, suffix, expected_status) in [
             (
@@ -3092,7 +2591,7 @@ mod tests {
             ),
         ] {
             let parent_run_id = RunId::parse(format!("run-cancel-{suffix}")).unwrap();
-            let node_id = ExecutionNodeId::parse("item.000.single").unwrap();
+            let node_id = ExecutionNodeId::parse("item.000.behavior").unwrap();
             let zero = zero_digest().unwrap();
             let mut graph = ExecutionGraphRecord::new_claimed(
                 ExecutionGraphId::parse(format!("graph-cancel-{suffix}")).unwrap(),
@@ -3105,7 +2604,7 @@ mod tests {
                 .unwrap(),
                 vec![ExecutionNodeSpec {
                     node_id: node_id.clone(),
-                    role_id: "mod.generate.single".into(),
+                    role_id: "composition.behavior".into(),
                     depends_on: Vec::new(),
                     request_snapshot_hash: zero,
                 }],
@@ -3121,7 +2620,7 @@ mod tests {
                     &node_id,
                     &parent_run_id,
                     VersionedPayload::from_typed(
-                        single_checkpoint_schema(),
+                        behavior_checkpoint_schema(),
                         &serde_json::json!({"fixture": true}),
                     )
                     .unwrap(),
@@ -3140,57 +2639,6 @@ mod tests {
             assert_eq!(graph.status(), expected_status);
             assert!(graph.active_run_id().is_none());
             assert_eq!(graphs.get(graph.id()).unwrap(), graph);
-        }
-    }
-
-    fn proposal(
-        relative_path: &str,
-        composition_merge: Option<CompositionFileMerge>,
-    ) -> SingleGenerateCompositionProposal {
-        SingleGenerateCompositionProposal {
-            result: SingleGenerateResult {
-                publication: SingleGeneratePublication::CompositionStaged,
-                artifact_manifest_ref: None,
-                manifest_sha256: None,
-                generated_file_count: 1,
-                validation_primitive: ats_kernel::PrimitiveId::parse("code.fixture-validate")
-                    .unwrap(),
-                acceptance_notes: Vec::new(),
-            },
-            writes: vec![ProjectFileWrite::new(relative_path, b"fixture".to_vec()).unwrap()],
-            artifact_files: vec![ProposedArtifactFile {
-                role: "source".into(),
-                relative_path: relative_path.into(),
-                composition_merge,
-                composition_merge_key_policy: composition_merge
-                    .map(|_| CompositionMergeKeyPolicy::UniqueKeys),
-            }],
-            provenance: SingleGenerationProvenance {
-                definition_hash: Sha256Digest::parse("a".repeat(64)).unwrap(),
-                model_request_sha256: Sha256Digest::parse("b".repeat(64)).unwrap(),
-                model: "fixture-model".into(),
-                usage: TokenUsage::default(),
-                selected_resources: Vec::<ModelResourceRef>::new(),
-            },
-        }
-    }
-
-    fn issue(
-        relative_path: &str,
-        repairability: ValidationIssueRepairability,
-        digest_digit: char,
-    ) -> ats_runtime::ValidationIssue {
-        ats_runtime::ValidationIssue {
-            validator_id: "code.fixture-validate".into(),
-            code: "FIXTURE001".into(),
-            severity: ValidationIssueSeverity::Error,
-            relative_path: Some(relative_path.into()),
-            line: Some(1),
-            column: Some(1),
-            message: "fixture diagnostic".into(),
-            symbol: Some("FixtureSymbol".into()),
-            repairability,
-            fingerprint: Sha256Digest::parse(digest_digit.to_string().repeat(64)).unwrap(),
         }
     }
 }

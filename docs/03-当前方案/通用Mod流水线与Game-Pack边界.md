@@ -4,9 +4,9 @@
 | --- | --- |
 | 状态 | Accepted; Provider foundation、STS2 cutover、trusted Prepare executor 与机器门禁已完成 |
 | 初始决议 | 2026-07-29 |
-| 本次修订 | 2026-08-18 |
+| 本次修订 | 2026-08-21 |
 | 适用范围 | 多游戏 Mod 的生成、验证、构建、打包、恢复与发布 |
-| 当前代码事实 | Provider v1/registry、`ats-game-sts2`、Provider-driven delivery 与 trusted Prepare executor 已接线；synthetic data-only 产品路径和完整机器门禁已通过；当前模型仍直接作者化原生文件，尚未实现 Behavior Adapter |
+| 当前代码事实 | Provider registry、STS2 Provider v2、synthetic data-only 路径和 trusted Prepare executor 已接线；Composition 已使用 Typed Behavior IR 与 deterministic Adapter，O10 完整机器门禁已通过，当前进入 O11 candidate 验收 |
 | 实施约束 | 本文不授权代码重构、candidate 构建、安装、发布或删除历史证据 |
 | 相关方案 | [Stage 2 分层能力与资源架构](../90-归档/已完成基线/2026-08-02-Stage-2分层能力与资源架构方案.md)；[Typed Behavior IR 与 Game Pack 确定性生成架构](./Typed-Behavior-IR与Game-Pack确定性生成架构方案.md) |
 
@@ -75,16 +75,16 @@ Product Feature / User Intent
 - 将任意 shell、脚本或动态插件权限开放给 Pack；
 - 用自动校验替代真实游戏人工行为与视觉验收。
 
-## 3. 当前问题与证据
+## 3. 决策触发与当前落点
 
-当前 `composition.generate` 的实际图固定为：
+Provider foundation 决策时，`composition.generate` 的实际图固定为：
 
 ```text
 item.000.plan -> item.000.single -> ... -> composition.finalize
 -> registered validation -> build -> package -> publish
 ```
 
-这条路径对当前 STS2 Character 有效，也已经具备 checkpoint、Resume、多 Item repair 和原子发布能力。但它混合了两类不同稳定性：
+这条旧路径具备 checkpoint、Resume、多 Item repair 和原子发布能力，但混合了两类不同稳定性：
 
 | 稳定、应跨游戏复用 | 随游戏变化、不应进入 Core |
 | --- | --- |
@@ -95,6 +95,15 @@ item.000.plan -> item.000.single -> ... -> composition.finalize
 | 输入输出 schema 校验 | DLL、JAR、PCK 或游戏目录布局 |
 
 2026-08-15 安装态 STS2 closure 还证明：即使 Core 的串行、退避和恢复机制正确，具体生成结果仍可能在 localization 形状或游戏 API 上失败。把更多 STS2 步骤写进通用 Feature 只会扩大耦合，不能解决多游戏差异。
+
+当前 Composition 已进一步切换为：
+
+```text
+Plan -> Behavior IR -> deterministic Render
+-> Provider Validate -> Build -> Package -> Publish
+```
+
+Provider/Runtime 边界保持不变；AI 原生文件作者权已移入受信 Game Adapter。
 
 ## 4. 分层职责
 
@@ -135,7 +144,8 @@ Core 禁止认识：
 
 ### 4.3 Game Adapter / Pipeline Provider
 
-建议每个真实游戏使用独立受信任模块，例如后续新增 `ats-game-sts2`；当前 STS2 实现迁移前仍留在既有 Feature/Adapter 代码中。
+每个真实游戏使用独立受信任模块。当前 STS2 实现在 `ats-game-sts2`，包括 Provider v2、
+Character/Card/Relic/Potion/Power Behavior Adapter 和游戏专属验证/构建物化。
 
 Provider 负责：
 
@@ -265,7 +275,7 @@ AI 不具有特殊编排地位：
 - 需要创作时，Provider 可以加入一个或多个 bounded model/media node；
 - 只转换现有文件时，图可以完全没有 AI node；
 - AI 输出永远先进入 typed validation/checkpoint，不直接写最终工程；
-- 技术修复与用户单 Item 调整仍走同一 Provider 解析出的受控子图；
+- 只有可归属的 Behavior output/IR 问题进入当前 Item 的语义反馈；用户调整也只替换目标 Behavior；
 - Core 不按模型名称切换格式、Prompt 或游戏逻辑。
 
 ## 7. Pipeline 示例
@@ -273,16 +283,16 @@ AI 不具有特殊编排地位：
 ### 7.1 STS2 Character
 
 ```text
-resolve typed Item closure
+resolve pinned Item closure
         |
         v
-plan/generate each owned source bundle       [optional AI]
+plan -> typed Behavior IR                     [optional AI]
         |
         v
-merge source + flat localization             [STS2 rule]
+deterministic Adapter render                  [STS2 rule]
         |
         v
-validate ownership / API / resources         [STS2 validators]
+validate API / resources / whole closure      [STS2 validators]
         |
         v
 dotnet publish -> Godot export-pack          [STS2 toolchain]
@@ -334,7 +344,8 @@ collect JAR/metadata -> publish
 | node 输入 schema/hash 不匹配 | `game.pipeline.input_invalid` | 否 |
 | Provider transport/rate limit | 原始 `model.*`/`media.*`，按 Core bounded retry | 仅当前 node |
 | AI typed output 不合法 | Feature feedback policy；无宽松解析 | 仅受控修订 node |
-| 游戏 validator 发现 generated-content issue | Provider 归属后形成有界 repair subgraph | 不发布 |
+| Behavior JSON/schema/IR 不合法 | 当前 Item typed feedback | 只执行有界语义修订 |
+| Adapter 渲染或 compiler 失败 | `game.adapter_unsupported` / `game.adapter_invalid` | 不请求模型、不发布 |
 | 本地工具链、锁或配置失败 | typed local failure；不发送给模型 | 不重试 AI |
 | checkpoint 与 pinned context 不一致 | `game.pipeline.checkpoint_invalid` | 不猜测恢复 |
 | build/package 失败 | graph paused/failed；保留 checkpoint | 不发布 |
@@ -348,9 +359,10 @@ collect JAR/metadata -> publish
 
 ### Good
 
-- STS2 Provider 解析出 C#、localization、dotnet、Godot 和 ZIP 节点；Core 只按 typed DAG 执行。
+- STS2 Adapter 从 Behavior IR 确定性渲染 C#/localization，Provider 物化 dotnet、Godot 和 ZIP
+  节点；Core 只按 typed DAG 执行。
 - 数据型游戏 Provider 生成一张没有模型节点、没有编译节点的图，仍得到完整 Run 和 Artifact。
-- 某个 Item 修复后只替换该 Item 的 checkpoint，随后运行 Provider 声明的完整闭包验证。
+- 某个 Item 调整后只替换该 Item 的 Behavior/Render checkpoint，随后运行完整闭包验证。
 - 新增游戏时新增 Provider、Pack 和 fixture，不修改 Runtime 的游戏分支。
 
 ### Base
@@ -415,23 +427,25 @@ Correct - Pack 选择受信任的版本化能力：
 | `ats-workspace` | graph/checkpoint/revision stores 与 publication journal | 游戏规则 |
 | `ats-features` | 用户意图、Provider resolution、执行与结果映射 | 固定游戏 stage list |
 | `ats-adapters` | HTTP、filesystem、process、archive、media 等通用 port 实现 | Feature 或 Pack 业务判断 |
-| `ats-game-sts2`（拟新增） | STS2 Provider、专属 Primitive/validator、图物化 | Core 状态机复制品 |
+| `ats-game-sts2` | STS2 Provider v2、五类 Behavior Adapter、专属 Primitive/validator、图物化 | Core 状态机复制品 |
 | `game_packs/sts2` | pinned data、profile、templates、resources、Truth Queries | 任意脚本和 credential |
 | Tauri / React | typed command、进度投影、Item 结果与调整入口 | DAG 编辑器和技术策略面板 |
 
 若实践证明一个 Primitive 只有 STS2 使用，就保留在 `ats-game-sts2`；只有第二个真实 Provider 复用并且语义一致时，才提升到通用 Adapter。
 
-## 12. 破坏性迁移计划
+## 12. 已完成的 Provider 迁移
 
-用户已允许不保留旧数据兼容。实施时采用 schema cutover，不增加兼容读取或双写：
+用户已允许不保留旧数据兼容。Provider foundation 已采用 schema cutover，不增加兼容读取或双写：
 
 1. 在 `ats-game-context` 定义 Provider v1、Pipeline Graph v1、typed nodes 和 registry；stable specs 同步为可执行合同。
 2. 在 Runtime 抽取通用 graph executor、graph-total policy 和 publish barrier；保留现有 Run/Artifact 不变量。
-3. 建立 STS2 Provider，将当前 `plan -> single -> finalize -> validate -> build -> package` 精确迁移为 STS2 图，先做到行为等价。
+3. 建立 STS2 Provider，先完成旧链路行为等价，再在 O10 升级为
+   `plan -> behavior -> render -> finalize -> validate -> build -> package`。
 4. 用不含 C#、Godot、DLL/PCK 和 AI 的 synthetic Provider 证明 Core 中没有 STS2 隐式假设。
 5. 将 `composition.generate` 改为请求 Provider 物化图，删除原硬编码阶段表和旧 schema reader。
-6. 完成 focused、workspace、DAG、desktop、frontend、GUI、真实 STS2 build/package 和安装态 E2E。
-7. 代码变化后构建全新 candidate、全新 Truth/Item/Run/Graph/Artifact；旧候选只保留诊断价值。
+6. Provider foundation 已通过当轮完整门禁；O10 Typed Behavior IR 工作区当前通过定点门禁，
+   仍待独立授权执行新的 workspace、DAG、desktop 和 frontend 全量门禁。
+7. O10 门禁后仍需构建全新 candidate、Truth/Item/Run/Graph/Artifact；旧候选只保留诊断价值。
 
 每一步都必须直接完成 cutover 或保持尚未接线，禁止同时维护“旧固定流程 + 新 Provider 流程”的长期双主链。
 
@@ -455,7 +469,7 @@ Correct - Pack 选择受信任的版本化能力：
 
 - STS2 Character 的 source/localization/compile/PCK/ZIP 图和当前输出行为等价。
 - synthetic data-only Provider 不调用 AI、dotnet 或 Godot。
-- generated-content issue 只能由 owning Provider 分类并形成有界 repair subgraph。
+- Behavior output/IR issue 只能修订 owning Item；Adapter/compiler issue 必须保持本地失败。
 - local/toolchain/configuration issue 不进入模型修复。
 
 ### End-to-end gates
@@ -488,13 +502,13 @@ Provider foundation 的跨 crate cutover 和机器门禁已完成，但后续 `r
 
 ### 需要明确授权的步骤
 
-- 开始跨 crate 的 Provider/Runtime/Feature 代码重构；
+- 构建和安装绑定 O10 source commit 的 fresh candidate；
 - 构建或安装新的 release candidate；
 - 发布、push、rebase 或历史改写；
 - 操作真实游戏 UI；
 - 删除旧 schema 数据或任何历史验证证据。
 
-当前已允许未来 schema 破坏性升级，但该允许不等同于删除历史 evidence；旧目录保持只读证据，不做兼容读取。
+当前 Pack v5 和 ExecutionGraph v5 已完成破坏性升级，但该允许不等同于删除历史 evidence；旧目录保持只读证据，不做兼容读取。
 
 ## 15. 完成定义
 
@@ -505,4 +519,6 @@ Provider foundation 只有同时满足下列机器条件才算实现，而不是
 3. 至少一个 data-only synthetic Provider 证明不同阶段图可运行。
 4. Pack 只能选择注册能力，无法注入任意执行逻辑。
 5. 所有恢复、失败、事务、Artifact 和用户调整不变量继续成立。
-上述 cutover 与 foundation 机器门禁已经完成；stable backend/frontend specs 和现有实现是当前可执行事实。父任务当前转入 Behavior IR/Adapter 子任务；该子任务完成后仍须新 candidate fresh installed closure 和用户真实 STS2 验收。这些后续门禁不反向改变 Provider foundation 的机器完成状态。
+上述 Provider cutover 与 foundation 机器门禁已经完成。Behavior IR/Adapter 子任务也已完成实现、
+文档同步、定点验证和 O10 完整机器门禁；仍尚需新 candidate fresh installed closure 和用户真实
+STS2 验收。这些后续门禁不反向改变 Provider foundation 或 O10 机器验证状态。

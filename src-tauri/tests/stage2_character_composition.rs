@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -19,10 +19,7 @@ use ats_features::composition_generate::{
 use ats_features::composition_plan::{
     CompositionPlanContext, CompositionPlanFeature, CompositionPlanRequest, CompositionPlanService,
 };
-use ats_features::mod_generate_single::{
-    SingleGenerateError, SingleGenerateFeature, SingleGenerateService,
-    validate_definition_resources,
-};
+use ats_features::mod_generate_single::{SingleGenerateError, validate_definition_resources};
 use ats_features::mod_plan::{ModPlanFeature, ModPlanService};
 use ats_features::project_build::{ProjectBuildFeature, ProjectBuildService};
 use ats_features::project_package::{
@@ -33,11 +30,11 @@ use ats_features::resource_prepare::{
     ResourcePrepareSource,
 };
 use ats_game_context::{
-    ContributionResolver, GamePackLoader, GamePipelineRegistry, LoadedGamePack,
-    TruthEvidenceRecord, TruthSnapshotIndex, TruthSnapshotManifest, TruthSnapshotSource,
-    VerifiedContributionSet, VerifiedTruthSnapshot, built_in_game_pack_asset,
+    BehaviorAdapterRegistry, ContributionResolver, GamePackLoader, GamePipelineRegistry,
+    LoadedGamePack, TruthEvidenceRecord, TruthSnapshotIndex, TruthSnapshotManifest,
+    TruthSnapshotSource, VerifiedContributionSet, VerifiedTruthSnapshot, built_in_game_pack_asset,
 };
-use ats_game_sts2::Sts2PipelineProvider;
+use ats_game_sts2::{Sts2BehaviorAdapter, Sts2PipelineProvider};
 use ats_kernel::{
     CompositionDraftId, CompositionId, CompositionProfileId, ItemId, PrimitiveId, ResourceId,
     SchemaVersion, Sha256Digest,
@@ -58,7 +55,8 @@ use futures_util::stream;
 fn pipeline_registry() -> GamePipelineRegistry {
     let primitives = [
         "feature.mod-plan",
-        "feature.mod-generate-single",
+        "feature.composition-behavior",
+        "game.behavior-render",
         "feature.composition-finalize",
         "feature.project-build",
         "feature.project-package",
@@ -75,6 +73,15 @@ fn pipeline_registry() -> GamePipelineRegistry {
     let mut registry = GamePipelineRegistry::new(primitives).unwrap();
     registry.register(Sts2PipelineProvider::new()).unwrap();
     registry
+}
+
+fn behavior_registry() -> &'static BehaviorAdapterRegistry {
+    static REGISTRY: std::sync::OnceLock<BehaviorAdapterRegistry> = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(|| {
+        let mut registry = BehaviorAdapterRegistry::new();
+        registry.register(Sts2BehaviorAdapter::new()).unwrap();
+        registry
+    })
 }
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -385,11 +392,6 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
     );
     let plan =
         resolve::<ModPlanFeature>(&resolver, &pack, ModPlanFeature::contribution_requirement());
-    let single = resolve::<SingleGenerateFeature>(
-        &resolver,
-        &pack,
-        SingleGenerateFeature::contribution_requirement(),
-    );
     let build = resolve::<ProjectBuildFeature>(
         &resolver,
         &pack,
@@ -426,7 +428,6 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
         pack: &pack,
         composition_contributions: &composition,
         plan_contributions: &plan,
-        single_contributions: &single,
         resource_contributions: &resource,
         build_contributions: Some(&build),
         package_contributions: Some(&package),
@@ -438,11 +439,9 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
         model_request_limits: ats_runtime::ModelRequestLimits::default(),
     };
     let plan_service = ModPlanService::built_in().unwrap();
-    let single_service = SingleGenerateService::built_in().unwrap();
     let pipelines = pipeline_registry();
     let service = CompositionGenerateService::new(
         &plan_service,
-        &single_service,
         &ProjectBuildService,
         &ProjectPackageService,
         &pipelines,
@@ -465,6 +464,7 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
         .execute_staged(
             CompositionGenerateDependencies {
                 model: &model,
+                behavior_adapters: behavior_registry(),
                 items: &items,
                 resources: &resources,
                 writer: &FileProjectWriter,
@@ -511,26 +511,19 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
             .all(|node| node.feedback_state.is_none())
     );
     assert_eq!(model.snapshots.lock().unwrap().len(), 23);
-    let model_character_resource_roles = {
+    let behavior_snapshots = {
         let snapshots = model.snapshots.lock().unwrap();
         snapshots
             .iter()
-            .filter(|snapshot| snapshot.feature_id() == &SingleGenerateFeature::id())
-            .map(ModelRequestSnapshot::selected_resources)
-            .find(|resources| resources.len() == required_character_roles.len())
-            .unwrap()
-            .iter()
-            .map(|resource| resource.logical_role.clone())
+            .filter(|snapshot| snapshot.feature_id() == &CompositionGenerateFeature::id())
+            .cloned()
             .collect::<Vec<_>>()
     };
-    assert_eq!(
-        model_character_resource_roles
+    assert_eq!(behavior_snapshots.len(), execution.result.items.len());
+    assert!(
+        behavior_snapshots
             .iter()
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>(),
-        required_character_roles
-            .into_iter()
-            .collect::<BTreeSet<_>>()
+            .all(|snapshot| snapshot.selected_resources().is_empty())
     );
     assert!(model.responses.lock().unwrap().is_empty());
     assert_eq!(execution.result.build.as_ref().unwrap().steps.len(), 1);
@@ -581,22 +574,25 @@ async fn sts2_branded_placeholder_prototype_prepares_resources_and_publishes_one
         .as_array()
         .unwrap()
         .iter()
-        .find(|node| {
-            node["selectedResources"]
-                .as_array()
-                .is_some_and(|resources| resources.len() == required_character_roles.len())
-        })
+        .find(|node| node["itemId"] == ROOT_ID)
+        .unwrap();
+    let character_result = execution
+        .result
+        .items
+        .iter()
+        .find(|item| item.item_id.as_str() == ROOT_ID)
         .unwrap();
     assert_eq!(
-        character_provenance["selectedResources"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|resource| resource["logicalRole"].as_str().unwrap())
-            .collect::<BTreeSet<_>>(),
-        required_character_roles
-            .into_iter()
-            .collect::<BTreeSet<_>>()
+        character_provenance["adapter"],
+        serde_json::to_value(pack.behavior_adapter()).unwrap()
+    );
+    assert_eq!(
+        character_provenance["behaviorSha256"],
+        serde_json::to_value(&character_result.behavior_sha256).unwrap()
+    );
+    assert_eq!(
+        character_provenance["renderedBundleSha256"],
+        serde_json::to_value(&character_result.rendered_bundle_sha256).unwrap()
     );
     for file in &manifest.files {
         let bytes = fs::read(

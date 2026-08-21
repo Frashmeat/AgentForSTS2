@@ -40,15 +40,15 @@ Any DAG change requires an approved architecture change plus this spec, script f
 
 ## 4. Pack, Truth, And Contributions
 
-`ats-game-context` loads pinned Pack schema v4, resolves exact Feature slots, verifies immutable Truth Snapshot v2 and returns bounded Evidence. Pack v4 has one top-level `itemTypes` catalog containing validated localized names, restricted generic field descriptors, Pack-declared localization fields, typed reference slots, conditional Resource profiles, required locales and executable Evidence Queries. Optional top-level `compositionProfiles` declare bounded preset/custom parameter contracts. STS2 and synthetic fixtures use the same contracts. Missing/duplicate types or fields, invalid reference/profile constraints, missing contribution, Pack/Snapshot mismatch, unsafe path, unknown Primitive or hash mismatch fails before product work.
+`ats-game-context` loads pinned Pack schema v5, resolves exact Feature slots, verifies immutable Truth Snapshot v2 and returns bounded Evidence. Pack v5 has one top-level `itemTypes` catalog containing validated localized names, restricted generic field descriptors, Pack-declared localization fields, typed reference slots, conditional Resource profiles, required locales and executable Evidence Queries. Optional top-level `compositionProfiles` declare bounded preset/custom parameter contracts. Pack v5 also binds one Capability Catalog and exact registered Adapter identity/implementation SHA. STS2 and synthetic fixtures use the same contracts. Missing/duplicate types or fields, invalid reference/profile constraints, missing contribution, Pack/Snapshot/Catalog/Adapter mismatch, unsafe path, unknown Primitive or hash mismatch fails before product work.
 
-`mod.plan` result v2 owns descriptive `evidenceRequirements`. The Pack v4 item catalog owns
+`mod.plan` result v2 owns descriptive `evidenceRequirements`. The Pack v5 item catalog owns
 per-item `evidenceQueries` with explicit symbol/term fields. Capability readiness and Single
 generation require every query group to match the active Truth Snapshot and never interpret Plan
 prose as an index key. A missing current Snapshot blocks every declared type; a partially matching
 Snapshot blocks only affected types with typed, query-indexed reasons.
 
-Pack v4 replaces each item's unconditional `requiredResourceRoles` with `resourceProfiles`. A type
+Pack v5 replaces each item's unconditional `requiredResourceRoles` with `resourceProfiles`. A type
 without a selector has at most one profile; a type with `resourceProfileField` must point to one
 required choice field whose options exactly match the profile IDs. Definition-bound readiness
 resolves only the selected profile. Plan may expose the bounded union for legacy leaf-item planning,
@@ -142,16 +142,16 @@ pub struct PipelineNode {
   uniqueness, dependency closure/DAG, phase ordering, referenced producer schema and ancestry,
   one terminal publish barrier covering the complete graph and exact registered Primitive versions.
   Resume re-resolves the same request and requires byte-equivalent graph data.
-- Composition Generate request v6 and result v3 make the Package request and Build/Package results
+- Composition Generate request v6 and result/artifact extension v4 make the Package request and Build/Package results
   optional as matched groups. A package request is required exactly when the resolved graph contains
   `feature.project-package`; caller presence alone cannot add or skip delivery.
-- Blueprint v7 persists the complete resolved pipeline, compiled trusted Prepare executor and
+- Blueprint v8 persists the complete resolved pipeline, compiled trusted Prepare executor and
   Graph-pinned `ModelRequestLimits`.
   Prepare output schemas equal the exact persisted checkpoint schemas; data-only may directly
-  produce the common finalize checkpoint without Plan/Single. Existing ExecutionGraph v4 continues
-  to own generative checkpoints, repair campaigns and the one graph-level validation/commit state
+  produce the common finalize checkpoint without Plan/Behavior/Render. ExecutionGraph v5 owns
+  Plan/Behavior/Render checkpoints, typed feedback and the one graph-level validation/commit state
   machine; Provider execution must not introduce another transaction or recovery runtime.
-- STS2 lives in `ats-game-sts2`. Its current profile owns Plan/Single/finalize, registered
+- STS2 lives in `ats-game-sts2`. Provider v2 owns Plan/Behavior/Render/finalize, registered
   validation, `feature.project-build`, `feature.project-package` and atomic publication. Build and
   Package Features still execute only Pack-reviewed recipes/layouts through finite runners.
 
@@ -162,7 +162,7 @@ pub struct PipelineNode {
 | unknown Provider/profile/version or Primitive drift | `game.pipeline.invalid` | none |
 | Provider graph Pack/Truth/source identity mismatch | `game.pipeline.invalid` | none |
 | duplicate node/dependency, cycle, phase regression or invalid publish barrier | `game.pipeline.invalid` | none |
-| Single validator differs from the Provider validation node | `composition.generate.validation_mismatch` | none |
+| requested validation Primitive differs from the Provider validation node | `composition.generate.validation_mismatch` | none |
 | package request presence differs from the Provider graph | `composition.input_invalid` | none |
 | validation/build/package failure | original `validation.*`, `build.*` or `artifact.*` family | no final publication |
 | valid graph and all stages succeed | one parent result, Artifact and project transaction | declared stages only |
@@ -213,7 +213,7 @@ let delivery = compile_verified_composition_pipeline(&graph)?;
 execute_with_existing_graph_transaction(delivery).await?;
 ```
 
-### Scenario: Pack v4 Item Catalog, Definition Identity, And Readiness
+### Scenario: Pack v5 Item Catalog, Definition Identity, And Readiness
 
 #### 1. Scope / Trigger
 
@@ -670,52 +670,73 @@ failures and deterministic graph/confirmation digests.
 
 ### Scenario: Publish A Resolved Composition As One Unit
 
-`composition.generate` is the eleventh catalog Feature. Request v6 pins the root
-`StoredItemDefinition`, optional Draft revision, artifact/mod identity and Provider-bound optional Package request. The
-Feature repeats `ResolvedItemGraph` resolution, then executes sorted nodes as proposed Plan/Single
-children without calling Single's project/Artifact publication path.
+#### 1. Scope / Trigger
+
+This scenario applies after a confirmed root resolves to one exact `ResolvedItemGraph`. The whole
+closure is one publication unit. Composition generation uses Behavior/Render checkpoints and never
+invokes standalone Single.
+
+#### 2. Signatures
+
+```rust
+GameBehaviorAdapter::validate_ir(&BehaviorRenderContext, &BehaviorProposal)
+    -> Result<(), BehaviorAdapterError>;
+GameBehaviorAdapter::render(&BehaviorRenderContext, &BehaviorProposal)
+    -> Result<RenderedItemBundle, BehaviorAdapterError>;
+ProjectStager::stage(ProjectStageRequest) -> Box<dyn PendingProjectStage>;
+ProjectPackageService::prepare(...) -> PreparedProjectPackage;
+```
+
+#### 3. Contracts
 
 ```text
 ResolvedItemGraph
-  -> N x (Plan child + composition_staged Single child)
-  -> bounded isolated project copy
-  -> apply all proposals + one validation
-  -> one isolated Build + composition_staged Package child
-  -> one rollback-capable real-project write transaction
-  -> one composition Artifact
-  -> parent succeeded terminal
+  -> per Item optional Plan -> Behavior -> Render
+  -> composition.finalize
+  -> provider.validate -> provider.build -> provider.package
+  -> atomic project publication -> one Artifact
 ```
 
-- Single result v2 and Package result v2 distinguish `published` from `composition_staged`; staged
-  results contain no fabricated Artifact ref/hash.
-- Build request v2 accepts an optional normalized output root. Pack build recipe steps may declare
-  `isolatedOutputProperty`; the registered process Adapter permits only `ModsPath` and resolves it
-  below the staged project.
-- `.ats`, `.git`, `.godot`, `artifacts`, `delivery`, `dist` and `target` are excluded from the bounded
-  project copy. Symlinks, more than 50,000 files or more than 2 GiB fail before model output is
-  published.
-- The final ZIP is streamed from the stage through the same project writer transaction as generated
-  source. Artifact input paths reference that pending real-project state and are hash-verified by
-  `ArtifactManifest` v3.
-- Final project commit uses a same-directory transaction-directory rename as its decision point.
-  Pre-decision rename failure rolls back complete backups before return; post-decision cleanup-only
-  directories are retried on the next writer access.
-- Validation, Build, Package, final-write, Artifact and cancellation failure retain completed child
-  Runs but restore real-project files and remove owned stage/Artifact state before returning.
-- The composition Artifact extension binds graph/root/Draft/profile provenance, node/file counts,
-  every child Run ID and the Package report. No node receives an independent final Artifact.
-- Process-stop recovery during final project transaction commit remains O6 scope; ordinary returned
-  errors are not allowed to leave an advertised partial publication.
+- Preflight binds exact Pack v5, Truth v2, Catalog, Adapter, root/Draft/profile and definition hashes.
+- Behavior checkpoint v1 binds ModelRequestSnapshot and normalized Behavior hashes.
+- Render checkpoint v1 binds `RenderedItemBundle`, Adapter identity and every file hash.
+- Finalize checkpoint v3 contains the complete deterministic closure.
+- No node writes the real project before registered validation, Build and Package succeed.
+- Result and Artifact extension v4 preserve Behavior/Render provenance.
+- Package, source and data files commit through one rollback-capable transaction.
+- Success creates exactly one immutable composition Artifact.
 
-Required deterministic gate:
+#### 4. Validation & Error Matrix
 
-```powershell
-cargo test -p agentthespire-desktop --test composition_generation -- --nocapture
-```
+| Failure | Result |
+| --- | --- |
+| stale/missing definition, Resource, Pack, Truth, Catalog or Adapter | pre-model typed failure; no stage/project mutation |
+| Behavior output/IR invalid | current Item typed feedback within bounded policy |
+| Adapter/render/compiler invalid | local `game.adapter_*`; zero model feedback |
+| staging/Build/Package invalid | typed local failure; owned staging removed |
+| project/Artifact publication fails before durable commit | rollback; no succeeded parent |
+| failure after `commit_prepared` | preserve roll-forward intent; no return to model |
+| success | one final directory, ZIP, Artifact and succeeded parent; zero staging/transaction residue |
 
-It must prove successful whole-closure publication, validation rejection and package-commit failure,
-including exact child terminal counts, recomputable composition manifest files and zero real-project,
-Artifact or staging residue on failed paths.
+#### 5. Good / Base / Bad Cases
+
+- Good: two Items restore deterministic Behavior/Render checkpoints, validate/build/package once and
+  publish one Artifact.
+- Base: one Behavior needs a typed revision; previous successful checkpoints remain unchanged and a
+  later Item still receives its baseline request.
+- Bad: call standalone Single for every Item and merge model-authored native files before compile.
+
+#### 6. Tests Required
+
+Tests must assert exact provenance/hash restoration, target-only adjustment, baseline availability,
+Adapter/compiler zero-feedback, one validation/build/package/publication, rollback, zero residue,
+succeeded reconciliation with zero external work and project-lock reacquisition.
+
+#### 7. Wrong Vs Correct
+
+Wrong: `N x Single publication -> merge -> compiler-to-model repair`.
+
+Correct: `N x Behavior/Render checkpoints -> one Provider closure -> one atomic publication`.
 
 ## 5. Resource Workspace
 
@@ -972,7 +993,7 @@ v4 unchanged and invokes Build/Package only after every Item outcome succeeds.
 
 ## 7. Feature Composition
 
-The shared registry contains exactly 12 current Features, including `composition.plan`, `composition.retry-node` and `composition.generate`. Composition planning persists reviewable Draft state and never publishes Item pointers or project files. Draft construction and revision own deterministic bottom-up rebinding of every internal pinned definition hash, so a Resource, behavior or replacement edit advances all affected ancestor hashes in the same CAS revision without changing optimistic-current baselines. Targeted retry replaces exactly one logical Draft node, then reuses the full Plan graph validator and Draft revision CAS; it never follows a newer Item pointer or lets the model author Resource/current/hash state. Composition generation reuses Plan, Single proposal, Build and Package services but owns one whole-closure publication boundary. Single generation owns the validated model bundle -> rollback-capable project writes -> real validation -> immutable Artifact -> Run success order. Batch invokes Single child Runs. Complex invokes Plan, Batch/Single, Build and Package. No composition creates an alternative Prompt, Resource, file transaction, build or package implementation.
+The shared registry contains exactly 12 current Features, including `composition.plan`, `composition.retry-node` and `composition.generate`. Composition planning persists reviewable Draft state and never publishes Item pointers or project files. Draft construction and revision own deterministic bottom-up rebinding of every internal pinned definition hash, so a Resource, behavior or replacement edit advances all affected ancestor hashes in the same CAS revision without changing optimistic-current baselines. Targeted retry replaces exactly one logical Draft node, then reuses the full Plan graph validator and Draft revision CAS; it never follows a newer Item pointer or lets the model author Resource/current/hash state. Composition generation owns Plan/Behavior/Render/finalize checkpoints, then reuses registered Provider validation, Build, Package and one whole-closure publication boundary. It does not invoke Single or consume Single contributions. Standalone Single still owns its independent validated model bundle and publication order; Batch invokes Single child Runs and Complex invokes Plan, Batch/Single, Build and Package. No composition creates an alternative Resource, transaction, build or package implementation.
 
 ### Scenario: Resume Large Composition Planning From Durable Node Checkpoints
 
@@ -1018,13 +1039,14 @@ pub trait CompositionDraftRepository {
 }
 ```
 
-`ExecutionGraphRecord` v2 contains `executionGraphId`, `ownerFeatureId`,
+`ExecutionGraphRecord` v5 contains `executionGraphId`, `ownerFeatureId`,
 `requestSnapshotHash`, monotonic `revision`, graph `status`, `activeRunId`, `previousRunId`,
 versioned+hashed `blueprint`, ordered nodes, optional immutable `commitIntent`, and optional
 `finalResultRef`. Each node contains stable ID/role/dependencies, status, attempt count/current
 attempt, request-snapshot hash, current versioned+hashed normalized checkpoint, safe failure,
-repair round, and latest diagnostic fingerprint/checkpoint hash. The graph may retain one safe
-graph-level failure. v2 has no v1 reader, migration or generated-file history.
+feedback round/phase, diagnostic fingerprint, candidate/checkpoint hash and safe request/feedback
+accounting. The graph may retain one safe graph-level failure. v5 reads only
+`.ats/execution-graphs-v5` and has no v1-v4 reader or migration.
 
 #### 3. Contracts
 
@@ -1038,9 +1060,9 @@ graph-level failure. v2 has no v1 reader, migration or generated-file history.
 - A succeeded model node has a checkpoint whose SHA-256 recomputes from the canonical versioned
   domain payload. Prompt, provider request/body, raw completion, credentials, stack traces and raw
   errors are forbidden in checkpoints.
-- Decode, typed output validation or exhausted transport failure pauses the graph. Retry/resume is
-  an explicit user action that creates a new parent Run. Registered-validation-guided repair is the
-  sole automatic semantic loop and never changes model, endpoint or response format.
+- Decode or typed output validation may enter the owning node's bounded feedback policy. Exhausted
+  transport failure pauses the graph. Resume is explicit and creates a new parent Run. Feedback
+  never changes model, endpoint or response format; Adapter/compiler/local failures never enter it.
 - After all nodes succeed, Feature finalization binds local identities, pinned hashes and Resource
   provenance, then reuses the complete composition graph validator.
 - `validatedContentDigest` covers immutable owner/request/blueprint identity, every ordered
@@ -1073,7 +1095,8 @@ paths, commands or Provider settings.
 | duplicate node/group, missing dependency, cycle, invalid count/binding target | typed preflight failure before HTTP |
 | CAS/claim revision mismatch or active Run exists | typed conflict; no new Run |
 | node response malformed, wrong typed shape or transport retries exhausted | checkpoint unchanged; graph paused; Run failed/interrupted |
-| every generated-content validation issue individually owns one non-merge file and policy permits | group all owners in dependency order; replace one complete Single checkpoint at a time; rerun complete validator suite |
+| Generate Behavior JSON/schema/IR issue and policy permits | revise only the current Behavior node; preserve every other checkpoint; rerun local IR validation |
+| Adapter/render/compiler/local failure | pause with owning typed failure; no semantic feedback |
 | local/non-repairable/ambiguous issue, unchanged replacement, repeated fingerprint+checkpoint, or policy exhausted | graph paused with safe graph failure; current checkpoint retained |
 | checkpoint hash/state mismatch or corrupt graph JSON | structural recovery failure for that graph; no guessed recovery |
 | Run create fails after graph claim | CAS compensation to paused; project-open recovery handles a failed compensation |
@@ -1131,285 +1154,200 @@ drafts.create_or_match(intent.draft(), intent.draft_payload_sha256())?;
 graphs.mark_succeeded(intent.final_ref())?;
 ```
 
-### Scenario: Resume Whole-Closure Generation Without Repeating Successful Model Work
 
-#### 1. Scope / Trigger
 
-This contract applies to `composition.generate`. A resolved closure may contain dozens of Items and
-requires one Plan plus one Single proposal per Item, so one invalid or truncated response must not
-discard every earlier successful model result. Direct `mod.generate.single` remains a bounded
-single-request path and does not create an execution graph.
+## 7.1 Typed Behavior IR And Deterministic Game Adapter Cutover
 
-#### 2. Signatures
+### 1. Scope / Trigger
+
+This contract applies when a structured Item requires game-native source or data. The model owns
+only semantic `BehaviorProposal`; confirmed ItemDefinition facts and native files remain local.
+The cutover is destructive: Pack v4 and earlier, Composition Generate Blueprint v7 and earlier,
+ExecutionGraph v4 and earlier generated-file Single checkpoints are evidence-only and receive no
+compatibility reader.
+
+The active versions are:
+
+| Contract | Target |
+| --- | --- |
+| Game Pack | v5, mandatory `behavior` declaration |
+| Truth Snapshot | remains v2, but pins/rejects exact Pack v5 identity |
+| ItemDefinition / CompositionDraft | remain v2 |
+| STS2 Pipeline Provider | v2 |
+| Composition Generate request / Blueprint | v6 / v8 |
+| ExecutionGraph | v5 in `.ats/execution-graphs-v5` |
+| Behavior / Render checkpoint | v1 / v1 |
+| Composition finalize checkpoint | v3 |
+
+### 2. Signatures
 
 ```rust
-pub struct CompositionGenerateRequest { // feature.composition-generate-request v6
-    pub artifact_id: String,
-    pub mod_id: String,
-    pub root: StoredItemDefinition,
-    pub draft: Option<CompositionDraftRef>,
-    pub package: Option<ProjectPackageRequest>,
-    pub repair_policy: RepairPolicy,
-    pub adjustment: Option<ItemAdjustment>,
-    pub execution: Option<CompositionGenerateExecutionRequest>,
+pub trait GameBehaviorAdapter: Send + Sync {
+    fn identity(&self) -> &BehaviorAdapterIdentity;
+    fn validate_ir(
+        &self,
+        context: &BehaviorRenderContext,
+        proposal: &BehaviorProposal,
+    ) -> Result<(), BehaviorAdapterError>;
+    fn render(
+        &self,
+        context: &BehaviorRenderContext,
+        proposal: &BehaviorProposal,
+    ) -> Result<RenderedItemBundle, BehaviorAdapterError>;
 }
 
-pub struct ItemAdjustment { // feature.item-adjustment v1
-    pub item_id: ItemId,
-    pub expected_definition_hash: Sha256Digest,
-    pub instruction: String, // trimmed, 1..=4,000 chars, no NUL
-    pub instruction_sha256: Sha256Digest,
-    pub created_at: String, // canonical RFC 3339 UTC
+impl BehaviorAdapterRegistry {
+    pub fn register(
+        &mut self,
+        adapter: impl GameBehaviorAdapter + 'static,
+    ) -> Result<(), BehaviorAdapterRegistryError>;
+
+    pub fn render(
+        &self,
+        expected: &BehaviorAdapterIdentity,
+        catalog: &CapabilityCatalog,
+        context: &BehaviorRenderContext,
+        proposal: &BehaviorProposal,
+    ) -> Result<RenderedItemBundle, BehaviorAdapterRegistryError>;
 }
-
-pub struct RepairCampaign { // Runtime-owned, provider/game neutral
-    pub validation_fingerprint: Sha256Digest,
-    pub targets: Vec<RepairTarget>,
-    pub current_target: u32,
-    pub adjustment: Option<ExecutionAdjustment>,
-}
-
-pub struct RepairTarget {
-    pub item_id: ItemId,
-    pub node_id: ExecutionNodeId,
-    pub checkpoint_hash: Sha256Digest,
-    pub diagnostic_fingerprints: Vec<Sha256Digest>,
-    pub status: RepairTargetStatus, // pending | active | completed
-}
-
-// ExecutionGraphRecord v4 owns the one graph-total counter across every campaign/feedback kind.
-pub semantic_request_count: u32,
-
-SingleGenerateProposal::checkpoint() -> SingleGenerateProposalCheckpoint;
-SingleGenerateService::restore_composition_proposal(
-    resources, request, context, checkpoint,
-) -> Result<SingleGenerateCompositionProposal, SingleGenerateError>;
-
-CompositionGenerateService::prepare_staged_start(...)
-    -> Result<StagedCompositionGenerateStart, CompositionGenerateError>;
-CompositionGenerateService::prepare_staged_resume(...)
-    -> Result<StagedCompositionGenerateStart, CompositionGenerateError>;
-CompositionGenerateService::execute_staged(...)
-    -> Result<StagedCompositionGenerateExecution, CompositionGenerateError>;
 ```
 
-`resume_execution_graph(executionGraphId, expectedRevision)` dispatches by the persisted graph
-`ownerFeatureId`; callers do not choose a resume Feature or author an internal execution identity.
+`ats-kernel` owns only `BehaviorAdapterId`, `CapabilityCatalogId`, `BehaviorCapabilityId` and
+`CapabilityParameterId`. `ats-game-context` owns Catalog/IR/render DTOs and the trusted registry.
+`ats-game-sts2` implements the Adapter. `ats-features` maps pinned Workspace definitions and
+Resources into `BehaviorRenderContext`; Runtime continues to store opaque `VersionedPayload`.
 
-#### 3. Contracts
+### 3. Contracts
 
-The backend enriches an initial v6 request with `execution.kind=start`. The immutable request also
-fixes `until_passed` or `max_rounds(1..20)` as the complete graph's semantic-feedback budget;
-`until_passed` still has the absolute 20-round safety ceiling.
-Resume creates a new parent
-Run and enriches the exact blueprint request with `kind=resume`, the graph ID, expected revision and
-previous Run ID. The graph contains exactly two model nodes per resolved Item plus one local node:
+Pack v5 contains one mandatory declaration:
+
+```json
+{
+  "behavior": {
+    "adapter": {
+      "id": "game.sts2.behavior",
+      "version": 1,
+      "implementationSha256": "<64 lowercase hex>"
+    },
+    "catalog": {
+      "schemaVersion": 1,
+      "id": "game.sts2.capabilities",
+      "version": 1,
+      "adapter": "<exact same adapter identity>",
+      "capabilities": [],
+      "itemTypes": []
+    }
+  }
+}
+```
+
+The loader validates the Catalog before exposing `LoadedGamePack`. A new Graph pins Pack
+ID/SHA-256, Truth Snapshot ID/SHA-256, Catalog ID/version/SHA-256 and Adapter
+ID/version/implementation SHA-256 before model work. Registry lookup requires the complete Adapter
+identity; ID-only or version-only fallback is forbidden.
+
+`BehaviorProposal` v1 contains exactly:
 
 ```text
-item.000.plan -> item.000.single -> item.001.plan -> item.001.single -> ...
-                                                                    -> composition.finalize
+schemaVersion, itemId, itemType, definitionHash,
+catalog { id, version, sha256 },
+adapter { id, version, implementationSha256 },
+invocations[] { capabilityId, arguments }
 ```
 
-- Dependencies impose stable FIFO-style Item order even before the shared HTTP queue is considered.
-- A Plan checkpoint contains the normalized typed Plan and its terminal child Run.
-- A Single checkpoint contains the validated `composition_staged` result, canonical generated role
-  contents and safe definition/model/resource provenance. It excludes the Prompt, request messages,
-  Provider body and raw completion envelope.
-- Before a Single checkpoint exists, closed output-contract failures (`output_truncated`, JSON
-  decode, file/role/content/merge shape or acceptance-note contract) may produce one typed
-  `feature.generation-feedback` v2 envelope. The graph CAS-persists that envelope, its diagnostic
-  fingerprint and the complete completion-byte SHA-256 before another model call. The next child
-  Run requests a complete bundle through the same Recipe/output contract; it never sends the raw
-  rejected candidate or applies a local compatibility conversion.
-- Each semantic model call has its own terminal child Run. Failed rounds remain Run evidence; the
-  successful Single checkpoint references only the final succeeded child Run. A semantic round does
-  not increment graph node attempt count. Process recovery preserves feedback state, interrupts the
-  active attempt and resumes from the persisted envelope in a new node attempt.
-- Runtime receives checkpoint-free output evidence through one provider-neutral
-  `ExecutionOutputFeedback { diagnostic_fingerprint, candidate_sha256, feedback }` value object.
-  `record_output_feedback` and `record_repair_output_feedback` share this input; the latter adds only
-  the active checkpoint hash. Runtime never decodes Feature diagnostics or model content.
-- Restore revalidates the exact definition hash, Pack-generated role set, selected immutable
-  Resource versions, normalized bundle and project writes without calling `ModelClient`.
-- Generated role metadata is joined to Pack file specifications by exact role ID. Validated bundle
-  ordering and Pack declaration ordering are independent; positional `zip` association is invalid
-  because it can assign merge ownership to the wrong role and corrupt restart validation.
-- Pack item guidance owns the current Item's source boundary and Truth Evidence exclusively owns
-  version-sensitive API/type/namespace/lifecycle facts. Plan prose is business and acceptance
-  guidance only; it cannot require executable symbols or authorize one Item to redeclare referenced
-  Items.
-- Child Runs are persisted create-or-match by exact Run ID and bytes after checkpoint CAS. A crash
-  between graph CAS and child persistence is repaired from the checkpoint; a different existing Run
-  is a storage failure.
-- `composition.finalize` reconstructs every proposal, enforces one validation Primitive, merges
-  files and validates writes locally. The graph then enters `validating`, not `commit_prepared`.
-- Registered validation issues are partitioned by normalized relative file ownership. Every error
-  admitted to a campaign is `generated_content`, maps to exactly one non-shared generated file and
-  therefore exactly one Item/node, and still binds the current Pack, Truth, definition, Resource and
-  checkpoint hashes. Any local, non-repairable, shared or ambiguous error rejects the complete
-  campaign before another model call.
-- Feature orders repair targets by the resolved composition dependency order already compiled into
-  graph nodes, never by filesystem enumeration, diagnostic order or React order. One campaign
-  contains at least one and at most the closure Item count. Duplicate diagnostics are fingerprint-
-  deduplicated and sorted within one target.
-- Runtime persists the complete `RepairCampaign` before the first target request. Exactly one target
-  is active. Each generated-content request contains only that Item's bounded typed issues and
-  current complete role files. Single reuses the original Pack/Truth/definition/resource/output
-  contracts; a valid replacement CAS-replaces only that node's checkpoint and marks the target
-  completed. Other checkpoint hashes must remain byte-identical.
-- A completed target can make the persisted `composition.finalize` checkpoint older than the
-  current Item checkpoints while the campaign still has pending targets. Resume reconstructs the
-  closure from every current checkpoint and CAS-replaces finalize before continuing
-  `current_target`. This is local reconciliation: it consumes no semantic request, never replays a
-  completed target, and must not be classified as `composition.execution.invalid`.
-- After the final target completes, Feature discards the campaign diagnostics, rebuilds finalize and
-  runs the complete registered validator. A new rejection compiles a new campaign from current
-  checkpoints; stale issues are never reused. Crash/Resume continues at `current_target` without
-  repeating completed targets.
-- `semantic_request_count` is graph-total across output feedback, validation campaigns and operator
-  adjustment. Every actual semantic model request consumes one count. `max_rounds` and the absolute
-  20-request ceiling apply before activating the next target, not once per Item.
-- `adjustment` is not a new Feature. A Shell command validates `itemId + expectedDefinitionHash`,
-  compiles one v1 adjustment envelope, and starts `composition.generate` v6 against an existing
-  pre-commit graph. The target Item's complete role set is regenerated once through the same Single
-  contracts, then Item-local checks, finalize and whole-closure validation rerun. No other Item is
-  requested or changed. Structural requests that change Item identity/type, references, Resource
-  profile or closure membership fail with `composition.adjustment.requires_replan`.
-- Build, Package, real-project transaction and the one composition Artifact execute only after all
-  model nodes, finalize and registered validation succeed. Only then is the publication intent
-  fixed and graph moved to roll-forward-only `commit_prepared`.
-- Result and Artifact extension are v2 and include the execution graph ID. The public Feature
-  catalog remains exactly 12 entries; execution nodes are not Features.
-- A succeeded graph reconciliation decodes the final result, succeeds a new parent Run and performs
-  zero model, validation, Build, Package, project-write or Artifact work.
+Allowed `CapabilityValue` variants are `text`, `integer`, `boolean`, `choice`, `item_reference`,
+`resource_reference` and `text_list`. The schema has `deny_unknown_fields`; therefore `source`,
+`relativePath`, `namespace`, `className`, localization bodies, project files and commands cannot
+enter model-authored IR.
 
-Runtime `ExecutionCommitIntent` accepts exactly one Draft intent or one generic publication intent.
-Mixed forms, unsafe target IDs or payload-hash mismatch are invalid graph records. ExecutionGraph
-v4 uses only `.ats/execution-graphs-v4`; v1/v2/v3 JSON is not read, migrated, copied or rewritten.
-Old directories remain untouched evidence. Composition Generate request v6 and Blueprint v7 are the
-only graph-creation contracts after this cutover; no compatibility reader accepts Blueprint v6 or
-earlier schemas. Composition Plan Blueprint v2 likewise pins `ModelRequestLimits` and does not read
-its v1 predecessor.
+`BehaviorRenderContext` contains pinned game/Truth/Catalog/Adapter identity plus a local Item view:
+canonical fields, confirmed localization fields, typed Item references and selected Resource
+versions/published paths. The model never authors these values. `RenderedItemBundle` v1 binds Item,
+definition hash, normalized Behavior SHA-256, Adapter identity and each role/path/bytes SHA-256.
+Paths are normalized project-relative paths, cannot enter `.ats/`, and roles/paths are unique.
 
-#### 4. Validation & Error Matrix
+The STS2 Provider v2 materializes this Item path:
 
-| Condition | Graph / Run result | Work retained |
+```text
+item.N.plan? -> item.N.behavior -> item.N.render
+composition.finalize -> provider.validate -> provider.build
+-> provider.package -> atomic publish
+```
+
+Behavior and Render are separate success checkpoints. Resume decodes only v1 checkpoints and never
+replays a succeeded node. A local render or compiler failure never invokes `ModelClient`.
+
+### 4. Validation & Error Matrix
+
+| Condition | Stable result | Model feedback |
 | --- | --- | --- |
-| non-repairable Plan/Single failure, exhausted policy or repeated identical output | current node Pending with safe failure; graph paused; parent failed | earlier checkpoints, terminal child Runs and hashed safe feedback state |
-| explicit resume revision/claim conflict | `composition.execution.conflict`; no new Running Run | unchanged graph |
-| checkpoint schema/hash/domain mismatch | `composition.execution.invalid` | no guessed output or model fallback |
-| child Run create conflicts with different bytes | `run.storage_failed` | checkpoint remains authoritative; no overwrite |
-| local merge/Primitive/write validation fails | finalize node fails and graph pauses | all Plan/Single checkpoints |
-| registered validation fails locally or cannot be repaired | graph pauses before commit intent | all current model checkpoints |
-| issues map to two or more uniquely owned Items | persist one dependency-ordered campaign and repair one target at a time | every current checkpoint plus bounded diagnostics |
-| any issue is shared, ambiguous, local or non-repairable | `validation.not_repairable`; no campaign/model call | every current checkpoint plus bounded validation evidence |
-| stale adjustment definition hash or non-member Item | `composition.adjustment.stale` / `composition.adjustment.invalid`; no model call | graph and checkpoints unchanged |
-| adjustment requires closure/reference/resource-profile change | `composition.adjustment.requires_replan`; no model call | graph and Draft/definitions unchanged |
-| adjustment target succeeds but whole closure rejects | compile a new technical campaign when safe, otherwise pause | adjusted target checkpoint and all untouched checkpoints |
-| Build/Package/publication fails after prepare | claim is released while commit remains roll-forward | all model checkpoints and publication intent |
-| crash with an active model node | structural recovery interrupts that attempt and pauses graph | all earlier succeeded nodes |
-| graph already succeeded but parent is not authoritative | new reconciliation Run succeeds from final result | zero model/publication work |
-| User cancellation during output/generated feedback | graph `cancelled`; parent/active child cancel through first-reason-wins | terminal earlier children and current safe feedback |
-| Pause/project close/switch/shutdown during validating or repairing | graph `paused`; active claim released and resumable | every succeeded checkpoint and safe feedback |
+| missing/invalid Catalog or exact Adapter identity | `game.adapter_invalid` before model work | no |
+| Behavior JSON/schema invalid | `model.output_invalid` at the current Behavior node | bounded IR feedback |
+| unknown capability/argument/type/range | typed `BehaviorIssue` owned by one Item | bounded IR feedback |
+| Item/definition/Catalog/Adapter hash drift | `composition.execution.invalid` | no |
+| valid IR unsupported by registered Adapter | `game.adapter_unsupported` | no |
+| Adapter returns unsafe/tampered/duplicate files | `game.adapter_invalid` | no |
+| deterministic output does not compile | `game.adapter_invalid` | no |
+| Provider/tool/storage/publication failure | existing typed local family | no |
 
-#### 5. Good / Base / Bad Cases
+Failure evidence contains only closed issue codes plus trusted capability/parameter IDs. It never
+contains Prompt, completion, Provider body, native source, compiler text, secret or unclassified
+absolute paths.
 
-- Good: Item zero Plan succeeds, Item zero Single returns invalid JSON, the controller persists typed
-  feedback and a new child Run returns a strictly valid complete bundle; later Items then execute.
-- Good: the same invalid completion repeats, no-progress pauses the graph, and Resume requests only
-  the failed Single using the persisted feedback before later Items; repository re-instantiation
-  proves restart recovery.
-- Good: Character, Card and Relic each own compiler errors. Feature persists three targets in
-  resolved dependency order, executes three serial complete-role replacements, then one complete
-  validation passes and one publication occurs.
-- Good: a user adjusts Card B using its current definition hash. Only Card B receives one model
-  request; Card A and Character checkpoint hashes remain unchanged; whole-closure validation passes.
-- Base: a campaign crashes after target two of five. Resume creates a new parent Run, retains the
-  first two completed target/checkpoint identities, reconciles finalize locally and starts with
-  target three.
-- Base: a two-Item closure completes four model nodes, one local finalize, one validation, one Build,
-  one Package, one project transaction and one composition Artifact.
-- Bad: restart `composition.generate` from the root request after one node fails, store a complete
-  Prompt/request snapshot in a checkpoint, or expose a partially generated project/Artifact.
-- Bad: retry Provider transport from Feature code; feed configuration/local-environment/storage or
-  ambiguous ownership failures to the model; silently switch model, endpoint or response format;
-  accept double-encoded JSON; retain raw completions; or continue after identical
-  diagnostic+candidate, unchanged replacement, repeated diagnostic+checkpoint or exhausted policy.
-  Output-contract and registered-validation feedback share one Feature-owned policy/state contract.
+### 5. Good / Base / Bad Cases
 
-#### 6. Tests Required
+- Good: a Card Behavior invokes `card.deal_damage` with a bounded integer. Local validation passes,
+  the exact STS2 Adapter renders stable source/localization bytes twice, and hashes match.
+- Good: one invalid argument receives one typed Item-local feedback revision; confirmed
+  localization and Resource bindings remain byte-identical.
+- Base: a data-only game selects a registered Adapter/Pipeline with no model or native build node.
+- Bad: a model response includes `source` or `relativePath`; strict decode rejects it before a
+  checkpoint. No parser extracts or cleans the field.
+- Bad: Pack pins the right Adapter ID with another implementation SHA; readiness fails before
+  queue/model/filesystem work and does not choose the nearest registered version.
+- Bad: valid IR renders uncompilable source; the system reports an Adapter defect and never asks the
+  model to guess a namespace or API.
+
+### 6. Tests Required
 
 ```powershell
+cargo test -p ats-kernel --lib
+cargo test -p ats-game-context behavior -- --nocapture
+cargo test -p ats-game-context pack -- --nocapture
+cargo test -p ats-game-sts2 -- --nocapture
+cargo test -p ats-features composition_generate -- --nocapture
 cargo test -p ats-runtime execution_graph -- --nocapture
-cargo test -p agentthespire-desktop --test composition_generation -- --nocapture
-cargo test -p agentthespire-desktop --test stage2_composition -- --nocapture
-npm run test:frontend
-npx tsc -b --pretty false
+node scripts/check-stage2-dependency-dag.mjs
 ```
 
-Assertions must cover output failure -> typed feedback -> strict success, identical-candidate
-no-progress, graph-total budget, repository re-instantiation, resume request count excluding
-successful nodes, stable serial order, exact child Run evidence, local finalize,
-registered-validation repair success, every feedback stop condition, feedback/repair crash recovery,
-absence of `commit_prepared` before validation success, one final publication path, succeeded
-reconciliation with zero model requests, claim CAS, Pause/Cancel and no staging/transaction residue.
-Also assert multi-owner grouping and stable dependency order, one active campaign target, completed-
-target crash recovery with local finalize reconciliation, remaining-target request count without
-replay, graph-total budget across targets, stale adjustment rejection before model work, one-Item
-adjustment isolation, and full validation after every campaign/adjustment.
-The GUI E2E success case must assert that one repairable invalid Single creates one failed terminal
-child Run and one persisted `output_contract` feedback state, then succeeds the same parent Run and
-graph without a user Resume. A separate no-progress/exhaustion case owns the Paused/Resume contract.
+Assertions must cover unknown native-authoring fields, duplicate Catalog entries, invalid parameter
+contracts, unknown capability/argument, exact Adapter/Catalog hash drift, duplicate registry
+identity without replacement, unsafe/tampered rendered files, byte-identical repeated render,
+restart/Resume checkpoint identity and zero model requests for Adapter/compiler defects.
 
-#### 6.1 Project-Local Tool Input Resolution
+### 7. Wrong Vs Correct
+
+Wrong - preserve model-authored native files behind another retry:
 
 ```rust
-ats_workspace::sync_or_validate_project_local_props(
-    project_root: &Path,
-    configured_paths: &LocalBuildPaths,
-) -> Result<LocalBuildPaths, ProjectLocalConfigError>
-```
-
-Create remains strict and calls `sync_project_local_props` with two configured plain files. Existing
-Open and every Generate/Build/Package entry call the resolver above before model/tool work. A fully
-valid configured pair updates only `Sts2AssemblyPath` and `GodotPath`; otherwise the resolver does
-not write and structurally parses those exact fields from existing `local.props`, including XML
-predefined/character references. Missing, duplicate, nested, malformed, non-file or symlink values
-return `ProjectLocalConfigError` and map to the stable local-environment failure.
-
-| Case | Configured pair | Existing `local.props` | Result |
-| --- | --- | --- | --- |
-| Good | two valid plain files | valid XML | atomically synchronize managed fields and return configured paths |
-| Base | empty/invalid pair | two valid project-local plain files | return project paths; file bytes remain unchanged |
-| Bad | empty/invalid pair | missing/malformed/duplicate/non-file values | fail before model/tool invocation; no mutation |
-
-#### 7. Wrong Vs Correct
-
-Wrong - repeat the entire closure after one semantic failure:
-
-```rust
-for definition in resolved.nodes {
-    plans.push(plan_model(definition).await?);
-    proposals.push(single_model(definition).await?);
-} // any error discards every previous result
-```
-
-Correct - persist validated domain checkpoints, one campaign cursor and restore proposals locally:
-
-```rust
-if node.status != Succeeded {
-    let proposal = single.propose(...).await?;
-    graph.complete_node(node.id, proposal.checkpoint())?;
+let source = model.complete(native_source_prompt).await?;
+if compiler.rejects(&source) {
+    return model.complete(repair_prompt(source)).await;
 }
-let proposal = single.restore_composition_proposal(
-    resources, &request, &context, decode_checkpoint(node)?,
+```
+
+Correct - keep semantics and native rendering in their owning layers:
+
+```rust
+let proposal = decode_strict_behavior(model.complete(request).await?)?;
+proposal.validate(pack.capability_catalog())?;
+let bundle = adapters.render(
+    pack.behavior_adapter(),
+    pack.capability_catalog(),
+    &local_render_context,
+    &proposal,
 )?;
-graph.begin_repair_campaign(expected_revision, campaign)?;
-while let Some(target) = graph.active_repair_target() {
-    replace_complete_roles(target).await?;
-    graph.complete_repair_target(expected_revision, target.node_id, checkpoint)?;
-}
-run_complete_validation_again()?;
+provider.validate(bundle)?; // failure is local; no semantic retry
 ```
 
 ## 8. Shell Cutover

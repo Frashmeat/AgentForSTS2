@@ -1,6 +1,7 @@
 //! Validated Game Pack contribution and immutable Truth Evidence contracts.
 
 mod asset;
+mod behavior;
 mod contribution;
 mod item;
 mod pack;
@@ -10,6 +11,15 @@ mod truth;
 
 pub use asset::{GamePackAssetError, built_in_game_pack_asset};
 pub use ats_kernel::GamePackId;
+pub use behavior::{
+    BEHAVIOR_PROPOSAL_SCHEMA_VERSION, BehaviorAdapterError, BehaviorAdapterIdentity,
+    BehaviorAdapterRegistry, BehaviorAdapterRegistryError, BehaviorCapabilitySet, BehaviorIssue,
+    BehaviorIssueCode, BehaviorItemContext, BehaviorItemReference, BehaviorProposal,
+    BehaviorRenderContext, BehaviorResourceBinding, CAPABILITY_CATALOG_SCHEMA_VERSION,
+    CapabilityCatalog, CapabilityCatalogIdentity, CapabilityInvocation, CapabilityParameterSpec,
+    CapabilityParameterType, CapabilitySpec, CapabilityValue, GameBehaviorAdapter,
+    PackBehaviorContract, RENDERED_ITEM_BUNDLE_SCHEMA_VERSION, RenderedFile, RenderedItemBundle,
+};
 pub use contribution::{
     ContributionRequirement, ContributionResolver, ContributionResolverError,
     VerifiedContributionSet,

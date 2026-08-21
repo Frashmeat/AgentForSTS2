@@ -134,14 +134,14 @@ Item-type branches. The Pack default profile is selected initially; Custom start
   or author a second graph.
 - Generation displays the persisted `composition.generate` Run status and safe failure code/stage.
   A returned Run ID or completed polling loop is not success evidence.
-- Generation v2 also carries a backend-authored execution identity. After submit or resume, Studio
+- Composition Generate request v6/result v4 also carry a backend-authored execution identity. After submit or resume, Studio
   extracts only `executionGraphId` from the validated persisted Run request, polls the bounded
   `ExecutionGraphView`, and uses the same Pause/Resume/Cancel controls as staged planning. Resume
   calls generic `resume_execution_graph`; the backend dispatches by graph owner, while React routes
   the returned Run to Plan or Generate monitoring by its validated `featureId`. React never decodes
   proposal checkpoints, infers dependencies or resubmits the root request as a retry.
 - Ordinary generation UI maps persisted Graph state to generating, checking, auto-adjusting,
-  needs-attention or preview-ready product states. Internal node/role/revision/compiler/feedback
+  needs-attention or preview-ready product states. Internal node/role/revision/Adapter/compiler/feedback
   counters and repair-policy controls are not rendered.
 - A preview adjustment input belongs to exactly one `adjustableItems` entry. React submits only the
   selected Graph revision, `itemId`, `definitionHash` and bounded instruction. A succeeded result

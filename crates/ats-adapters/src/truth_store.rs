@@ -197,8 +197,48 @@ mod tests {
     use super::*;
 
     fn pack() -> LoadedGamePack {
-        let json = br#"{"schemaVersion":4,"id":"fixture-game","displayName":"Fixture","itemTypes":[{"id":"fixture_item","displayNames":{"eng":"Fixture item"},"evidenceQueries":[{"symbols":["Fixture.Symbol"],"terms":[]}]}],"contributions":[]}"#;
-        GamePackLoader::load(json, &sha256_bytes(json)).unwrap()
+        let value = serde_json::json!({
+            "schemaVersion": 5,
+            "id": "fixture-game",
+            "displayName": "Fixture",
+            "behavior": {
+                "adapter": {
+                    "id": "game.fixture.behavior",
+                    "version": 1,
+                    "implementationSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "catalog": {
+                    "schemaVersion": 1,
+                    "id": "game.fixture.capabilities",
+                    "version": 1,
+                    "adapter": {
+                        "id": "game.fixture.behavior",
+                        "version": 1,
+                        "implementationSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    },
+                    "capabilities": [{
+                        "id": "fixture.noop",
+                        "description": "Fixture no-op capability.",
+                        "maxInvocationsPerItem": 1,
+                        "parameters": []
+                    }],
+                    "itemTypes": [{
+                        "itemType": "fixture_item",
+                        "allowedCapabilities": ["fixture.noop"],
+                        "minInvocations": 0,
+                        "maxInvocations": 1
+                    }]
+                }
+            },
+            "itemTypes": [{
+                "id": "fixture_item",
+                "displayNames": {"eng": "Fixture item"},
+                "evidenceQueries": [{"symbols": ["Fixture.Symbol"], "terms": []}]
+            }],
+            "contributions": []
+        });
+        let bytes = serde_json::to_vec(&value).unwrap();
+        GamePackLoader::load(&bytes, &sha256_bytes(&bytes)).unwrap()
     }
 
     fn write_snapshot(runtime: &Path, pack: &LoadedGamePack) -> PathBuf {

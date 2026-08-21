@@ -50,7 +50,7 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
 
 ## 5. Pack, Truth, And Resource
 
-- Pack v4 bytes/schema/hash are validated before registration.
+- Pack v5 bytes/schema/hash are validated before registration.
 - A Feature declares required Contribution slots; missing/duplicate/unknown slots fail before work.
 - Pack data may reference only registered Primitive IDs and cannot execute arbitrary script/native code.
 - Pack `pack.composition-generate` v2 selects one exact registered Provider identity and profile.
@@ -61,7 +61,7 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
 - Truth Snapshot sources/indexes and current pointer are content-addressed and verified for the active Pack.
 - Evidence is bounded and traceable; missing/invalid current Truth stops dependent Features.
 - Plan v2 stores descriptive `evidenceRequirements`; executable `symbols`/`terms` queries belong to
-  each item type in the Pack v4 top-level catalog. Every query group must match current verified
+  each item type in the Pack v5 top-level catalog. Every query group must match current verified
   Truth before model work, and final Evidence is bounded and deduplicated.
 - Required Resource role IDs are Pack-owned execution facts in the same item catalog. The Plan
   model output cannot author them; the Feature deterministically attaches them to Plan result v2.
@@ -78,7 +78,7 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
   evidence and acceptance guidance, but Features rebind Plan identity/type/behavior from the
   definition and Single resolves every prose conflict in favor of that definition. Do not compare
   or heuristically parse Plan prose to reconstruct canonical/localization/Resource/reference facts.
-- Pack v4 `referenceSlots` own kind/target/cardinality/quantity rules. Identity edges never expand
+- Pack v5 `referenceSlots` own kind/target/cardinality/quantity rules. Identity edges never expand
   a version hash; pinned edges expand exact definitions and must form an acyclic closure.
 - Composition guidance `referenceBindingRules` generically constrain per-source slot binding count
   or pinned total quantity. Duplicate targets and Draft nodes disconnected from the root pinned
@@ -87,14 +87,14 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
 - A binding rule whose resolved target-group union is empty authors no `referenceBindings` entry.
   It must not persist an empty slot array because ItemDefinition v2 rejects empty binding lists;
   zero-count optional groups remain represented by the selected composition profile and Blueprint.
-- Pack v4 `resourceProfiles` own conditional required roles. The selector is a required canonical
+- Pack v5 `resourceProfiles` own conditional required roles. The selector is a required canonical
   choice whose options exactly cover profile IDs; Single resolves only the selected profile.
 - `ModPlan.requiredResourceRoles` is the bounded union across a type's Pack profiles, while
   definition-bound Single/Composition readiness is the exact selected-profile set. Do not compare
   these sets for equality: validate the Plan union against the descriptor, then validate selected
   Resource bindings independently against the definition selector. Cover an empty-role Placeholder
   and a five-role Branded Placeholder in the same regression.
-- Pack v4 `compositionProfiles` own Standard/Prototype presets, Custom bounds, cross-parameter
+- Pack v5 `compositionProfiles` own Standard/Prototype presets, Custom bounds, cross-parameter
   constraints and the hard <=128-node estimate. Feature/UI interpret this generic schema and do
   not embed STS2 composition counts.
 - CompositionDraft v2 is persisted separately from ItemDefinition with revision CAS, optional
@@ -146,44 +146,36 @@ Adding a Feature must not add a Runtime `RunKind`, center result union, Shell-sp
   `itemTypes[].guidance`; Single serializes only the selected type as `itemGuidance`. Generation
   entries must cover exactly the top-level catalog IDs and declare exact file roles. Type-specific
   rules must never be appended to common guidance or selected by a code branch.
-- A generated file path may repeat across composition nodes only when every matching Pack file role
-  declares `compositionMerge=json_object` plus `compositionMergeKeyPolicy=unique_keys`.
-  That policy owns contributor uniqueness without prescribing a game's runtime key syntax. The Pack,
-  Truth and registered validator own runtime identity. Before a current Single checkpoint succeeds,
-  the Feature compares its claims with every prior successful checkpoint; duplicate keys enter typed
-  output feedback for the current Item. Restore repeats the same claim validation. `exclusive_path`
-  permits game-defined fixed keys but only one composition node may contribute to its target path.
-  The merger never renames model output, accepts only flat string-valued JSON objects, rejects
-  duplicate keys deterministically, and writes one sorted object before staging. STS2 uses `unique_keys` for
-  Card/Relic/Character/Potion/Power tables and `exclusive_path` for Character's four Architect
-  lines in each locale's `ancients.json`.
-- ExecutionGraphRecord v4 directly replaces v3 and persists only current normalized checkpoints,
-  attempt/feedback state and at most one dependency-ordered `RepairCampaign`. The campaign stores
-  bounded typed diagnostic fingerprints, target Item/node/checkpoint identities, one active cursor,
-  graph-total semantic request count and optional version-bound operator adjustment. The repository
-  reads only `.ats/execution-graphs-v4`; no v1/v2/v3 fallback, migration,
-  dual write or repair archive is allowed. Old directories remain untouched evidence.
+- Pack v5 binds one exact Capability Catalog and registered Adapter identity/implementation SHA.
+  Readiness validates Pack, Truth, Catalog and Adapter before any Composition model work. Pack can
+  select registered code but cannot inject commands, plugins or a fallback implementation.
+- BehaviorProposal v1 contains only item identity plus Catalog-scoped capability invocations,
+  arguments and typed references. It cannot contain source, relative path, namespace, class name,
+  localization content, Resource paths or build/package commands.
+- Confirmed localization, selected Resources, references, identity and target paths are rendered
+  locally. The registered Adapter renders valid Behavior IR into a `RenderedItemBundle`; identical
+  pinned inputs must produce identical file bytes and hashes.
+- ExecutionGraphRecord v5 replaces v4 and reads only `.ats/execution-graphs-v5`. Old directories
+  remain untouched evidence and receive no reader, migration or dual write. It persists Plan,
+  Behavior and Render checkpoints, exact provenance, current feedback state, request/feedback
+  counters, adjustment identity, commit intent and final result.
 - Checkpoint-free and repair-output evidence enters Runtime as the common
   `ExecutionOutputFeedback` value object. Do not grow parallel positional-argument APIs or decode
   `GenerationFeedbackEnvelope` below Feature code.
-- Composition Generate request v6 and Blueprint v7 fix `until_passed` or `max_rounds(1..20)` before graph creation.
-  The limit is the total semantic-feedback budget across the complete graph, never a per-node
-  multiplier. `until_passed` uses the same absolute 20-round safety ceiling; it does not mean
-  unbounded requests. Direct `mod.generate.single` remains strict and single-request. Composition may feed
-  back repairable output-contract diagnostics before checkpoint creation or a deterministic campaign
-  of individually owned generated-content issues after registered validation. Every target call returns a complete
-  bundle/role set and reruns the same strict decode and validation closure. `commit_prepared` is
-  unreachable before registered validation succeeds.
-- Multiple repairable owners are ordered by the resolved graph and repaired serially. A shared,
-  ambiguous, local or non-repairable issue rejects the entire campaign. One target replacement must
-  leave every other checkpoint hash unchanged; campaign completion always reruns whole-closure
-  validation and recompiles diagnostics from scratch.
-- If a parent Run stops after one or more targets complete, Resume must reconcile the local finalize
-  checkpoint from the current Item checkpoints before continuing the cursor. Reconciliation makes
-  no model request, does not replay completed targets and cannot weaken merge or restore checks.
+- Composition Generate Blueprint v8 plans one baseline Behavior request per semantic node. The
+  Graph shared allowance limits only additional typed output/IR feedback; `semanticRequestCount`
+  audits all calls and `semanticFeedbackCount` records revisions. One Item cannot consume another
+  planned Item's baseline. Direct `mod.generate.single` remains strict and independent.
+- Behavior JSON/schema/capability/argument/reference issues may revise only the current Item.
+  Adapter/render/compiler/storage/publication issues are local typed failures and must not enter
+  model feedback. `commit_prepared` remains unreachable before registered whole-closure
+  validation succeeds.
+- Resume restores successful Behavior/Render checkpoints and reconciles finalize without model,
+  Adapter, Build, Package or publication replay. Succeeded reconciliation performs zero external
+  work.
 - A generated-result adjustment is an operation of `composition.generate`, not Feature 13. The
   request binds `itemId + expectedDefinitionHash`, stores only a bounded/hashable instruction
-  envelope, replaces one complete Item role set and reruns whole-closure validation. Stale or
+  envelope, replaces only the target Behavior/Render checkpoint and reruns whole-closure validation. Stale or
   structural adjustments fail before model work. Ordinary React does not expose Graph IDs,
   revisions, compiler codes, semantic counters or repair-policy controls.
 - Project-local `local.props` manages only `Sts2AssemblyPath` and `GodotPath`, preserving `ModsPath`
@@ -208,7 +200,7 @@ Feature Recipe + Pack Contribution + Item Definition + Truth Evidence + Selected
 = ModelRequestSnapshot
 ```
 
-Feature Recipe owns cross-game task language. Pack v4 generation contributions own common and
+Feature Recipe owns cross-game task language. Pack v5 generation contributions own common and
 selected-item game guidance separately. Truth owns current facts. Workspace owns selected
 resources. Settings own `llm.custom_prompt`. Code owns protocol/safety/schema only.
 
@@ -403,8 +395,8 @@ request trimming.
 #### 1. Scope / Trigger
 
 This contract applies when `composition.generate` consumes one confirmed composition root. The
-complete pinned closure is one publication unit; a node may produce successful Plan/Generate child
-evidence without publishing its files independently.
+complete pinned closure is one publication unit. Composition uses typed Behavior IR and registered
+deterministic adapters; it never invokes standalone Single or publishes one Item independently.
 
 #### 2. Signatures And Schemas
 
@@ -418,20 +410,18 @@ pub struct CompositionGenerateRequest {
     pub execution: Option<CompositionGenerateExecutionRequest>,
 }
 
-SingleGenerateService::propose(...) -> SingleGenerateProposal
-SingleGenerateService::restore_composition_proposal(...) -> SingleGenerateCompositionProposal
+GameBehaviorAdapter::validate_ir(&BehaviorRenderContext, &BehaviorProposal)
+    -> Result<(), BehaviorAdapterError>;
+GameBehaviorAdapter::render(&BehaviorRenderContext, &BehaviorProposal)
+    -> Result<RenderedItemBundle, BehaviorAdapterError>;
 ProjectPackageService::prepare(...) -> PreparedProjectPackage
 ProjectStager::stage(ProjectStageRequest) -> Box<dyn PendingProjectStage>
 ```
 
-The parent request/result and Artifact extension use schema v2. The backend authors `execution`
-only after it wins a start/resume graph claim. `SingleGenerateResult` and
-`ProjectPackageResult` use schema v2 and an exact `publication` discriminator:
-
-```text
-published          -> final Artifact refs are required
-composition_staged -> final Artifact refs are absent
-```
+The Composition result and Artifact extension use schema v4. The backend authors `execution` only
+after it wins a start/resume graph claim. Behavior checkpoint v1 binds Pack/Truth/Catalog/Adapter,
+definition, ModelRequestSnapshot and normalized IR hashes. Render checkpoint v1 binds the complete
+`RenderedItemBundle` and each file hash. Finalize checkpoint is v3.
 
 `ProjectBuildRequest` is schema v2 with optional `outputRelativeRoot`. A Pack build step may name
 one `isolatedOutputProperty`; the registered Adapter currently accepts only `ModsPath` and binds it
@@ -442,27 +432,28 @@ to a normalized directory below the staged project.
 | Boundary | Required behavior |
 | --- | --- |
 | Preflight | Resolve and validate the complete `ResolvedItemGraph` before Run creation and repeat it inside the Feature before model or project work |
-| Node execution | ExecutionGraph stores a strict serial `Plan -> Single` pair per sorted Item and one local finalize node; succeeded normalized checkpoints and exact terminal child Runs survive parent failure/restart |
-| Resume | A new parent Run claims the same graph, restores successful Single proposals from typed checkpoints plus immutable Resources, locally reconciles a stale finalize checkpoint, and calls the model only for the current unfinished target |
+| Node execution | ExecutionGraph v5 stores `Plan -> Behavior -> Render` per sorted Item, one finalize node and Provider Validate/Build/Package nodes |
+| Resume | A new parent Run restores successful Behavior/Render checkpoints, reconciles finalize locally and calls the model only for an unfinished Behavior target |
+| Semantic accounting | Every Behavior node has one baseline; shared allowance applies only to additional output/IR feedback |
+| Deterministic render | Confirmed localization, Resources, references, identity and paths are local; identical pinned input produces identical bytes |
 | Staging | Copy one bounded, non-symlink project worktree below `.ats/composition-staging/<parentRunId>` and exclude mutable evidence/build roots |
-| Validation | Apply every proposed write to the isolated copy, validate once, then Build once with a Pack-declared isolated output property |
-| Package | Prepare one ZIP inside the isolated copy; its child result remains `composition_staged` |
+| Validation | Apply every rendered write to the isolated copy, validate once, then Build once with a Pack-declared isolated output property |
+| Package | Prepare one ZIP inside the isolated copy without publishing it independently |
 | Publication | Stream generated files plus the prepared ZIP through one rollback-capable real-project transaction, clean the isolated stage, publish one composition Artifact, then complete the parent Run |
-| Evidence | Parent result/Artifact bind graph digest, exact root/profile/Draft provenance, every node definition/model request/resource identity, all child Run IDs, package report and every final file hash |
+| Evidence | Parent result/Artifact bind graph digest, root/profile/Draft, every definition/request/Behavior/Render/Pack/Truth/Catalog/Adapter identity, package report and final file hashes |
 | React | Select only confirmed Pack-declared composition roots, submit the typed request, and render persisted Run terminal state without a Character/game branch |
 
-The package output path must be unique. Generated target paths are unique unless every collision
-declares the same `compositionMerge=json_object` contract; those inputs are flat-string validated,
-duplicate-key checked and deterministically consolidated before staging. Every node must resolve the
-same validation Primitive. Pack data cannot choose commands, arguments, arbitrary environment
-variables or an output path outside the isolated stage.
+The package output path is unique. Rendered target paths and merged localization are owned by the
+registered Adapter/renderer and checked before staging. Pack data cannot choose commands, arbitrary
+environment variables, plugins or an output path outside the isolated stage.
 
 #### 4. Validation And Error Matrix
 
 | Failure | Stable family | Required mutation result |
 | --- | --- | --- |
 | stale/missing/wrong graph node, resource or Truth | `composition.graph.*` | no model call when preflight decides; no staging/project/Artifact mutation |
-| one Plan/Single failure or cancellation | originating `model.*`, `truth.*`, `resource.*`, `pack.*` or `run.*` | graph paused at that node; completed checkpoints/child Runs retained; no real-project publication |
+| one Plan/Behavior failure or cancellation | originating `model.*`, `behavior.*`, `truth.*`, `resource.*`, `pack.*` or `run.*` | graph paused at that node; completed checkpoints retained; no real-project publication |
+| Adapter/render/compiler defect | `game.adapter_unsupported` / `game.adapter_invalid` | graph paused locally; zero semantic feedback; no publication |
 | graph claim/checkpoint/storage failure | `composition.execution.*` or `run.storage_failed` | no overwrite or guessed recovery; successful checkpoints remain immutable |
 | invalid/oversized/symlinked staging source | `composition.staging.*` | owned stage removed; real project unchanged |
 | whole-closure validation rejection | `validation.rejected` | staged copy removed; real project/Artifact unchanged |
@@ -480,13 +471,12 @@ symlinked or escaping records fail recovery without guessing a result.
 
 #### 5. Good / Base / Bad Cases
 
-- Good: a two-node identity+pinned graph creates four Plan/Single children plus Build and Package,
-  validates/builds once, publishes two sources and one ZIP in one composition Artifact and leaves no
-  staging directory.
-- Good: the first Single output is invalid after its Plan succeeds; a new repository instance and
-  new parent Run resume that Single, then continue later Items without repeating the Plan.
-- Base: validation rejects after every proposal. Four successful proposal child Runs remain valid
-  evidence, while the real project, package and Artifact roots remain unchanged.
+- Good: a two-node graph persists two Behavior/Render pairs, validates/builds once, publishes one
+  source closure and ZIP in one Artifact, and leaves no staging directory.
+- Good: the first Behavior output is invalid after Plan succeeds; a new parent Run resumes that
+  Behavior and continues later Items without repeating successful checkpoints.
+- Base: an Adapter rejects a declared capability. The graph pauses with `game.adapter_unsupported`,
+  ModelClient call count is unchanged, and the real project remains unchanged.
 - Bad: invoke ordinary Single independently for each node. The first node could publish before a
   later cross-reference fails and whole-closure compilation would never be proven.
 - Bad: point normal Build output at the real game Mods directory. An isolated rejection could still
@@ -504,12 +494,12 @@ npm run test:frontend
 npx tsc -b --pretty false
 ```
 
-Assertions must cover graph/root identity, exact child count/status, staged discriminators, one
+Assertions must cover graph/root identity, Behavior/Render provenance, one
 validation/build/package, source-file ZIP streaming, manifest/hash recomputation, validation and
 package/final-commit rollback, zero real-project mutation on failure, zero staging residue, and no
 Character/STS2 branch in generic Feature/Shell/React code. They must also cover restart recovery,
-successful-node request counts, exact child Run create-or-match and succeeded reconciliation with
-zero model requests.
+baseline/feedback request counts, target-only adjustment, Adapter/compiler zero-feedback and
+succeeded reconciliation with zero model/Adapter/Pipeline requests.
 
 `mod-plan` pretty-serializes the complete verified `itemTypes` catalog plus plan guidance into the
 required `pack.guidance` slot. That slot is bounded to 64,000 characters. A built-in Pack expansion
@@ -954,9 +944,7 @@ empty array and are otherwise non-blank, NUL-free, at most 64 items and 2,000 ch
 | Pack merge and key policy are not both present or both absent | `SingleGenerateError::InvalidPackContribution` before HTTP | `pack.contribution_invalid` |
 | provider rejects the dynamic schema | `ModelError::Rejected` | `model.request_rejected` |
 | malformed JSON, wrong shape, missing/extra role, or blank/NUL/oversized content | typed decode or `validate_bundle` rejection | `model.output_invalid` |
-| current `unique_keys` proposal duplicates a prior successful claim | typed feedback before current Single checkpoint completion | `model.output_invalid` with `merge_key_conflict` |
-| restored checkpoints have duplicate claims | restore rejection before further execution or publication | `composition.execution.invalid` |
-| second contributor to `exclusive_path` or policy mismatch | Single-boundary/finalize hard rejection | `model.output_invalid` at `composition.generate.merge` |
+| merge/policy declaration is inconsistent | Pack contribution rejection before HTTP | `pack.contribution_invalid` |
 | exact roles and bounded content | continue to project transaction, validation and Artifact publication | later typed stage or `succeeded` |
 
 Code validation remains authoritative. It must reject an incompatible provider response even when a
@@ -968,14 +956,11 @@ requirements hidden from the request.
 - Good: `custom_code` compiles one required `source` property into Prompt, Snapshot and provider
   schema; a matching object reaches compile validation.
 - Base: `relic` compiles `source`, `localization.eng`, and `localization.zhs`; Pack order controls
-  deterministic project writes while JSON object key order is irrelevant. Two Card Items may share
-  `cards.json` only when each uses `unique_keys` and contributes disjoint runtime keys.
-- Base: Character owns one `ancients.json` contribution per locale through `exclusive_path`; no
-  second Item may contribute to either target path.
+  deterministic project writes while JSON object key order is irrelevant.
 - Bad: a generic `files: [{ role: string, content: string }]` schema lets the provider return an
   arbitrary role that Runtime later rejects; this caused the installed-candidate failure.
-- Bad: several Items each emit generic `title`/`description` keys and only discover the collision at
-  finalize. v5 assigns the duplicate to the current Single and feeds back a typed conflict before checkpoint completion.
+- Bad: reuse standalone Single output as a Composition contribution or collision-repair mechanism.
+  Composition localization identity is now deterministic renderer ownership.
 - Bad: force localization keys into an Item ID prefix in generic Feature code. BaseLib derives the
   runtime ID from namespace and model type; Pack guidance and validation must retain that game truth.
 - Bad: silently rename duplicate localization keys during merge. The merger must reject the conflict
@@ -1000,9 +985,7 @@ Required assertions:
 - Prompt contains the exact pretty-serialized Snapshot schema once;
 - Prompt Pack contribution exposes item type, common/item guidance and generated role/merge/policy;
 - wrong role fails `model.output_invalid`; correct multi-role output compiles and publishes;
-- `unique_keys` accepts disjoint runtime keys and assigns a duplicate to the current Single feedback;
-- restore repeats claim validation; one exclusive contribution, duplicate exclusive contribution and
-  policy mismatch remain hard failures;
+- merge/policy mismatch remains a hard Pack contribution failure;
 - generated file metadata is associated with Pack declarations by exact role under deliberately
   different role/declaration order, never by vector position;
 - a worker that fails before Feature-owned pause leaves a failed terminal Run and a paused Graph

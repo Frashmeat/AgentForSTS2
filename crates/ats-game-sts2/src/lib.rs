@@ -1,5 +1,11 @@
 //! Trusted STS2 pipeline descriptions. External IO remains behind runtime ports.
 
+mod behavior;
+
+pub use behavior::{
+    BEHAVIOR_ADAPTER_ID, BEHAVIOR_ADAPTER_IMPLEMENTATION_SHA256, Sts2BehaviorAdapter,
+};
+
 use ats_game_context::{
     GamePipelineProvider, PipelineCheckpointPolicy, PipelineNode, PipelineNodePhase,
     PipelineNodeScope, PipelinePrimitiveBinding, PipelineProviderError, PipelineProviderIdentity,
@@ -55,16 +61,18 @@ impl GamePipelineProvider for Sts2PipelineProvider {
             return Err(PipelineProviderError::InvalidRequest);
         }
 
-        let mut nodes = Vec::with_capacity(request.work_items.len() * 2 + 5);
-        let mut previous_single = None;
-        let mut single_outputs = Vec::with_capacity(request.work_items.len());
+        let mut nodes = Vec::with_capacity(request.work_items.len() * 3 + 5);
+        let mut previous_render = None;
+        let mut render_outputs = Vec::with_capacity(request.work_items.len());
         for (index, item) in request.work_items.iter().enumerate() {
             let plan_id = node_id(format!("item.{index:03}.plan"))?;
-            let single_id = node_id(format!("item.{index:03}.single"))?;
+            let behavior_id = node_id(format!("item.{index:03}.behavior"))?;
+            let render_id = node_id(format!("item.{index:03}.render"))?;
             let definition_slot = format!("item.{index:03}.definition");
             let plan_slot = format!("item.{index:03}.plan-checkpoint");
-            let single_slot = format!("item.{index:03}.single-checkpoint");
-            let plan_dependencies = previous_single.into_iter().collect();
+            let behavior_slot = format!("item.{index:03}.behavior-checkpoint");
+            let render_slot = format!("item.{index:03}.render-checkpoint");
+            let plan_dependencies = previous_render.into_iter().collect();
             nodes.push(PipelineNode {
                 node_id: plan_id.clone(),
                 scope: PipelineNodeScope::Item {
@@ -86,12 +94,12 @@ impl GamePipelineProvider for Sts2PipelineProvider {
                 publish_barrier: PipelinePublishBarrier::BeforeCommit,
             });
             nodes.push(PipelineNode {
-                node_id: single_id.clone(),
+                node_id: behavior_id.clone(),
                 scope: PipelineNodeScope::Item {
                     item_id: item.item_id.clone(),
                 },
                 phase: PipelineNodePhase::Prepare,
-                primitive_id: primitive("feature.mod-generate-single"),
+                primitive_id: primitive("feature.composition-behavior"),
                 primitive_version: version(),
                 consumes: vec![
                     value(&definition_slot, "pipeline.item-definition", 2),
@@ -102,22 +110,49 @@ impl GamePipelineProvider for Sts2PipelineProvider {
                     ),
                 ],
                 produces: value(
-                    &single_slot,
-                    "feature.composition-generate-single-checkpoint",
+                    &behavior_slot,
+                    "feature.composition-generate-behavior-checkpoint",
                     1,
                 ),
-                depends_on: vec![plan_id],
+                depends_on: vec![plan_id.clone()],
                 checkpoint_policy: PipelineCheckpointPolicy::OnSuccess,
                 retry_class: PipelineRetryClass::SemanticFeedback,
+                validation: Vec::new(),
+                publish_barrier: PipelinePublishBarrier::BeforeCommit,
+            });
+            nodes.push(PipelineNode {
+                node_id: render_id.clone(),
+                scope: PipelineNodeScope::Item {
+                    item_id: item.item_id.clone(),
+                },
+                phase: PipelineNodePhase::Prepare,
+                primitive_id: primitive("game.behavior-render"),
+                primitive_version: version(),
+                consumes: vec![
+                    value(&definition_slot, "pipeline.item-definition", 2),
+                    value(
+                        &behavior_slot,
+                        "feature.composition-generate-behavior-checkpoint",
+                        1,
+                    ),
+                ],
+                produces: value(
+                    &render_slot,
+                    "feature.composition-generate-render-checkpoint",
+                    1,
+                ),
+                depends_on: vec![behavior_id],
+                checkpoint_policy: PipelineCheckpointPolicy::OnSuccess,
+                retry_class: PipelineRetryClass::Never,
                 validation: vec![primitive_binding("code.dotnet-validate")],
                 publish_barrier: PipelinePublishBarrier::BeforeCommit,
             });
-            single_outputs.push(value(
-                &single_slot,
-                "feature.composition-generate-single-checkpoint",
+            render_outputs.push(value(
+                &render_slot,
+                "feature.composition-generate-render-checkpoint",
                 1,
             ));
-            previous_single = Some(single_id);
+            previous_render = Some(render_id);
         }
 
         let finalize = node_id("composition.finalize")?;
@@ -125,13 +160,13 @@ impl GamePipelineProvider for Sts2PipelineProvider {
             finalize.clone(),
             primitive("feature.composition-finalize"),
             PipelineNodePhase::Prepare,
-            previous_single.into_iter().collect(),
+            previous_render.into_iter().collect(),
             stage_values(
-                single_outputs,
+                render_outputs,
                 value(
                     "composition.prepared-checkpoint",
                     "feature.composition-generate-finalize-checkpoint",
-                    2,
+                    3,
                 ),
             ),
             PipelineRetryClass::Never,
@@ -147,7 +182,7 @@ impl GamePipelineProvider for Sts2PipelineProvider {
                 vec![value(
                     "composition.prepared-checkpoint",
                     "feature.composition-generate-finalize-checkpoint",
-                    2,
+                    3,
                 )],
                 value("composition.validated-tree", "pipeline.validated-tree", 1),
             ),
@@ -301,7 +336,8 @@ mod tests {
     fn primitives() -> Vec<(PrimitiveId, SchemaVersion)> {
         [
             "feature.mod-plan",
-            "feature.mod-generate-single",
+            "feature.composition-behavior",
+            "game.behavior-render",
             "feature.composition-finalize",
             "code.dotnet-validate",
             "feature.project-build",
@@ -324,14 +360,14 @@ mod tests {
         let first = registry.resolve(&selection, &request(2)).unwrap();
         let second = registry.resolve(&selection, &request(2)).unwrap();
         assert_eq!(first, second);
-        assert_eq!(first.nodes.len(), 9);
+        assert_eq!(first.nodes.len(), 11);
         assert_eq!(
             first
                 .nodes
                 .iter()
                 .filter(|node| matches!(node.scope, PipelineNodeScope::Item { .. }))
                 .count(),
-            4
+            6
         );
         assert_eq!(
             first
@@ -371,7 +407,7 @@ mod tests {
                             value(
                                 "composition.prepared-checkpoint",
                                 "feature.composition-generate-finalize-checkpoint",
-                                2,
+                                3,
                             ),
                         ),
                         PipelineRetryClass::Never,
@@ -386,7 +422,7 @@ mod tests {
                             vec![value(
                                 "composition.prepared-checkpoint",
                                 "feature.composition-generate-finalize-checkpoint",
-                                2,
+                                3,
                             )],
                             value("data.publication", "pipeline.publication", 1),
                         ),

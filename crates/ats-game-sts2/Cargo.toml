@@ -11,3 +11,8 @@ workspace = true
 [dependencies]
 ats-game-context = { path = "../ats-game-context" }
 ats-kernel = { path = "../ats-kernel" }
+serde_json = "1"
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"

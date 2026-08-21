@@ -275,6 +275,9 @@ version = "0.1.0"
 dependencies = [
  "ats-game-context",
  "ats-kernel",
+ "serde_json",
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]

@@ -32,3 +32,36 @@ pub struct FeatureContract {
     pub result_schema: SchemaRef,
     pub required_contributions: Vec<ContributionId>,
 }
+
+#[cfg(test)]
+pub(crate) fn fixture_behavior_json(item_type: &str) -> serde_json::Value {
+    serde_json::json!({
+        "adapter": {
+            "id": "game.fixture.behavior",
+            "version": 1,
+            "implementationSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "catalog": {
+            "schemaVersion": 1,
+            "id": "game.fixture.capabilities",
+            "version": 1,
+            "adapter": {
+                "id": "game.fixture.behavior",
+                "version": 1,
+                "implementationSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "capabilities": [{
+                "id": "fixture.noop",
+                "description": "Fixture no-op capability.",
+                "maxInvocationsPerItem": 1,
+                "parameters": []
+            }],
+            "itemTypes": [{
+                "itemType": item_type,
+                "allowedCapabilities": ["fixture.noop"],
+                "minInvocations": 0,
+                "maxInvocations": 1
+            }]
+        }
+    })
+}

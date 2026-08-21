@@ -813,11 +813,7 @@ mod tests {
                         Vec::new(),
                         PipelinePublishBarrier::BeforeCommit,
                     ),
-                    node(
-                        "fixture.commit",
-                        Vec::new(),
-                        PipelinePublishBarrier::Commit,
-                    ),
+                    node("fixture.commit", Vec::new(), PipelinePublishBarrier::Commit,),
                 ],
             ),
             Err(PipelineGraphError::InvalidPublishBarrier)

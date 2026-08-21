@@ -27,7 +27,6 @@ pub enum OutputContractDiagnosticCode {
     FileRole,
     FileContent,
     MergeShape,
-    MergeKeyConflict,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
@@ -55,7 +54,6 @@ pub enum ExpectedOutputShape {
     BoundedStringArray,
     NonEmptyString,
     FlatStringObject,
-    UniqueObjectKeys,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]

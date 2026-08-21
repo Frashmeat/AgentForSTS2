@@ -526,8 +526,20 @@ mod tests {
     use super::*;
 
     fn pack() -> LoadedGamePack {
-        let json = br#"{"schemaVersion":4,"id":"fixture-game","displayName":"Fixture","itemTypes":[{"id":"fixture_item","displayNames":{"eng":"Fixture item"},"evidenceQueries":[{"symbols":["Player.StartTurn"],"terms":[]}]}],"contributions":[]}"#;
-        GamePackLoader::load(json, &sha256_bytes(json)).unwrap()
+        let value = serde_json::json!({
+            "schemaVersion": 5,
+            "id": "fixture-game",
+            "displayName": "Fixture",
+            "behavior": crate::behavior::fixture_behavior_json("fixture_item"),
+            "itemTypes": [{
+                "id": "fixture_item",
+                "displayNames": {"eng": "Fixture item"},
+                "evidenceQueries": [{"symbols": ["Player.StartTurn"], "terms": []}]
+            }],
+            "contributions": []
+        });
+        let bytes = serde_json::to_vec(&value).unwrap();
+        GamePackLoader::load(&bytes, &sha256_bytes(&bytes)).unwrap()
     }
 
     fn verified_snapshot(pack: &LoadedGamePack) -> VerifiedTruthSnapshot {

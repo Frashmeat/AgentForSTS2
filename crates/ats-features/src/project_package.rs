@@ -460,9 +460,10 @@ mod tests {
     #[test]
     fn synthetic_pack_uses_the_same_build_and_package_contracts() {
         let value = serde_json::json!({
-            "schemaVersion":4,
+            "schemaVersion":5,
             "id":"fixture-game",
             "displayName":"Fixture Game",
+            "behavior": crate::fixture_behavior_json("fixture_item"),
             "itemTypes":[{
                 "id":"fixture_item",
                 "displayNames":{"eng":"Fixture item"},

@@ -468,9 +468,10 @@ mod tests {
 
     fn synthetic_pack(label: &str) -> LoadedGamePack {
         let json = serde_json::json!({
-            "schemaVersion": 4,
+            "schemaVersion": 5,
             "id": format!("fixture-{label}"),
             "displayName": format!("Fixture {label}"),
+            "behavior": crate::fixture_behavior_json("fixture_item"),
             "itemTypes": [{
                 "id": "fixture_item",
                 "displayNames": {"eng":"Fixture item"},
