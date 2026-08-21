@@ -321,7 +321,7 @@ impl ModelClient for BudgetCheckingModel<'_> {
 
 fn expected_budget(request: &ModelRequestSnapshot, cap: u32) -> u32 {
     match request.feature_id().as_str() {
-        "mod.plan" => 3_072.min(cap),
+        "mod.plan" => 4_096.min(cap),
         "composition.generate" => 4_096.min(cap),
         feature => panic!("unexpected model Feature {feature}"),
     }

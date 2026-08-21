@@ -71,6 +71,6 @@
       }
     }
   },
-  "maxOutputTokens": 3072,
+  "maxOutputTokens": 4096,
   "temperature": 0.3
 }
