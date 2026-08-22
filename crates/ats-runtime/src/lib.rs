@@ -35,14 +35,15 @@ pub use execution_graph::{
     ExecutionOutputFeedback, ExecutionPublicationIntent, ExecutionRepairCampaign,
     ExecutionRepairTarget, ExecutionRepairTargetSpec, ExecutionRepairTargetStatus,
     HashedExecutionPayload, LogicalAttemptOutcome, LogicalNodeAttempt, MAX_SEMANTIC_REQUESTS,
-    hash_json,
+    RepairCause, hash_json,
 };
 pub use media::{MediaClient, MediaError, MediaRequest, MediaRequestSnapshot, MediaResponse};
 pub use model::{
-    FinishReason, MAX_MODEL_OUTPUT_TOKENS, ModelClient, ModelError, ModelGamePackRef, ModelMessage,
-    ModelMessageRole, ModelOutputContract, ModelRequest, ModelRequestError, ModelRequestLimits,
-    ModelRequestSnapshot, ModelResourceRef, ModelResponse, ModelStream, ModelStreamEvent,
-    RecipeRef, TokenUsage,
+    FinishReason, MAX_MODEL_OUTPUT_TOKENS, ModelClient, ModelContextBinding, ModelError,
+    ModelGamePackRef, ModelMessage, ModelMessageRole, ModelOutputContract, ModelRequest,
+    ModelRequestCommitment, ModelRequestCommitmentIdentity, ModelRequestContextBinding,
+    ModelRequestError, ModelRequestLimits, ModelRequestSnapshot, ModelResourceRef, ModelResponse,
+    ModelStream, ModelStreamEvent, RecipeRef, TokenUsage,
 };
 pub use payload::{PayloadError, VersionedPayload};
 pub use repository::{

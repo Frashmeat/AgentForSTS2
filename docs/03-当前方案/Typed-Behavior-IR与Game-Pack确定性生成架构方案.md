@@ -24,7 +24,7 @@ Game Pipeline Provider -> 游戏专属 Validate / Build / Package / Publish
 
 禁止保留“新 IR 失败时回退到旧的 AI 直接 C#/JSON 生成”兼容路径。旧 Graph、Run、Artifact 和 candidate 仅保留为历史证据。
 
-当前工作区已经实现 Pack v5、ExecutionGraph v5、Behavior/Render checkpoints、STS2 五类 Adapter、
+当前工作区已经实现 Pack v5、ExecutionGraph v6、Behavior/Render checkpoints、STS2 五类 Adapter、
 baseline/shared feedback accounting 和 Behavior-scoped 单 Item adjustment。实现已通过定点门禁，
 但尚未通过完整机器门禁或 fresh candidate 验收，因此本文保持当前方案身份而不归档。
 
@@ -121,7 +121,7 @@ RenderedItemBundle
 +-- files[] { role, relativePath, bytes, sha256 }
 ```
 
-Pack、Truth、Catalog 和 ModelRequestSnapshot identity 由 Behavior/Render checkpoint provenance
+Pack、Truth、Catalog 和 ModelRequestCommitment identity 由 Behavior/Render checkpoint provenance
 额外绑定，不伪装成 `RenderedItemBundle` 自身字段。
 
 ## 5. 所有权合同
@@ -184,7 +184,7 @@ provider.validate -> provider.build -> provider.package -> atomic publish
 不变量：
 
 - Resume 不重跑已成功的 semantic 或 render checkpoint。
-- Behavior checkpoint 绑定 definition、Pack、Truth、Capability Catalog、Adapter 和 ModelRequestSnapshot hash。
+- Behavior checkpoint 绑定 definition、Pack、Truth、Capability Catalog、Adapter 和 ModelRequestCommitment hash；完整 Prompt 只存在于请求内存。
 - Render 失败不消耗模型请求；Adapter 缺陷不得被伪装成 semantic feedback。
 - 发布仍只能在完整闭包验证成功后一次原子进行。
 - Artifact provenance 必须包含 Behavior IR 和 Adapter 身份/hash。

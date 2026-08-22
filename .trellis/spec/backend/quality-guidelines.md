@@ -419,7 +419,7 @@ ProjectStager::stage(ProjectStageRequest) -> Box<dyn PendingProjectStage>
 ```
 
 The Composition result and Artifact extension use schema v4. The backend authors `execution` only
-after it wins a start/resume graph claim. Behavior checkpoint v1 binds Pack/Truth/Catalog/Adapter,
+after it wins a start/resume graph claim. Behavior checkpoint v2 binds Pack/Truth/Catalog/Adapter,
 definition, ModelRequestSnapshot and normalized IR hashes. Render checkpoint v1 binds the complete
 `RenderedItemBundle` and each file hash. Finalize checkpoint is v3.
 
@@ -432,7 +432,7 @@ to a normalized directory below the staged project.
 | Boundary | Required behavior |
 | --- | --- |
 | Preflight | Resolve and validate the complete `ResolvedItemGraph` before Run creation and repeat it inside the Feature before model or project work |
-| Node execution | ExecutionGraph v5 stores `Plan -> Behavior -> Render` per sorted Item, one finalize node and Provider Validate/Build/Package nodes |
+| Node execution | ExecutionGraph v6 stores `Plan -> Behavior -> Render` per sorted Item, one finalize node and Provider Validate/Build/Package nodes |
 | Resume | A new parent Run restores successful Behavior/Render checkpoints, reconciles finalize locally and calls the model only for an unfinished Behavior target |
 | Semantic accounting | Every Behavior node has one baseline; shared allowance applies only to additional output/IR feedback |
 | Deterministic render | Confirmed localization, Resources, references, identity and paths are local; identical pinned input produces identical bytes |

@@ -89,7 +89,7 @@ argument type/bound/required-field invalid
 typed reference invalid for the current Item
 ```
 
-Before another model call, ExecutionGraph v5 CAS-persists a bounded, versioned, hashed safe feedback
+Before another model call, ExecutionGraph v6 CAS-persists a bounded, versioned, hashed safe feedback
 envelope and candidate/Behavior hash. It never persists raw completion, parser text, Prompt,
 Provider body, model-authored unknown path or role.
 
@@ -125,16 +125,17 @@ compiler-to-model repair campaign.
 
 ### 4.4 Adjustment
 
-`adjust_composition_item` binds:
+`submit_composition_item_feedback` binds:
 
 ```text
-executionGraphId + expectedRevision
-itemId + expectedDefinitionHash
-bounded instruction
+source succeeded executionGraphId + expectedRevision
+itemId + expectedDefinitionHash + expectedBehaviorSha256
+bounded instruction (transient IPC/worker input only; never persisted)
 ```
 
 `composition.adjustment.stale`, `.invalid` and `.requires_replan` fail before model work.
-Adjustment details may include safe Item identity/hash fingerprints but not instruction text.
+Feedback details may include safe Item identity/hash fingerprints but not instruction text; a paused
+human target cannot be resumed without submitting the feedback again from its succeeded source.
 A valid adjustment replaces only target Behavior/Render checkpoints and revalidates the closure.
 
 ## 5. Validation & Error Matrix

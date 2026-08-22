@@ -32,7 +32,7 @@ const base = {
   canPause: true,
   canResume: false,
   canCancel: true,
-  adjustableItems: [{ itemId: "fixture-child", definitionHash: "a".repeat(64) }],
+  adjustableItems: [{ itemId: "fixture-child", definitionHash: "a".repeat(64), behaviorSha256: "b".repeat(64) }],
 };
 
 test("ExecutionGraphView accepts only the closed feedback phase wire", () => {

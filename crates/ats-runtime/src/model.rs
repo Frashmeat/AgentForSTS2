@@ -10,7 +10,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-pub const MODEL_REQUEST_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
+pub const MODEL_REQUEST_SNAPSHOT_SCHEMA_VERSION: u32 = 2;
 pub const MAX_MODEL_OUTPUT_TOKENS: u32 = 65_536;
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Eq, PartialEq)]
@@ -176,17 +176,77 @@ impl ModelResourceRef {
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelContextBinding {
+    pub role: String,
+    pub schema: SchemaRef,
+    pub sha256: Sha256Digest,
+}
+
+impl ModelContextBinding {
+    fn validate(&self) -> Result<(), ModelRequestError> {
+        if !valid_label(&self.role, 128) {
+            return Err(ModelRequestError::InvalidContextBinding);
+        }
+        Ok(())
+    }
+}
+
+pub type ModelRequestContextBinding = ModelContextBinding;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelRequestCommitmentIdentity {
+    pub schema_version: u32,
+    pub feature_id: FeatureId,
+    pub recipe: RecipeRef,
+    pub game_pack: ModelGamePackRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truth_snapshot_id: Option<Sha256Digest>,
+    pub selected_resources: Vec<ModelResourceRef>,
+    pub context_bindings: Vec<ModelContextBinding>,
+    pub rendered_messages_sha256: Sha256Digest,
+    pub output_contract_schema: SchemaRef,
+    pub output_contract_sha256: Sha256Digest,
+    pub max_output_tokens: u32,
+    pub temperature_bits: Option<u32>,
+    pub requested_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelRequestCommitment {
+    pub identity: ModelRequestCommitmentIdentity,
+    pub request_sha256: Sha256Digest,
+}
+
+impl ModelRequestCommitment {
+    pub fn verify(&self) -> Result<(), ModelRequestError> {
+        validate_identity(&self.identity)?;
+        if compute_commitment_hash(&self.identity)? != self.request_sha256 {
+            return Err(ModelRequestError::IdentityMismatch);
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn request_sha256(&self) -> &Sha256Digest {
+        &self.request_sha256
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ModelRequestSnapshot {
     schema_version: u32,
     feature_id: FeatureId,
     recipe: RecipeRef,
     game_pack: ModelGamePackRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     truth_snapshot_id: Option<Sha256Digest>,
     selected_resources: Vec<ModelResourceRef>,
+    context_bindings: Vec<ModelContextBinding>,
     request: ModelRequest,
+    commitment: ModelRequestCommitment,
     request_sha256: Sha256Digest,
 }
 
@@ -196,28 +256,68 @@ impl ModelRequestSnapshot {
         recipe: RecipeRef,
         game_pack: ModelGamePackRef,
         truth_snapshot_id: Option<Sha256Digest>,
+        selected_resources: Vec<ModelResourceRef>,
+        request: ModelRequest,
+    ) -> Result<Self, ModelRequestError> {
+        Self::new_with_bindings(
+            feature_id,
+            recipe,
+            game_pack,
+            truth_snapshot_id,
+            selected_resources,
+            Vec::new(),
+            request,
+        )
+    }
+
+    pub fn new_with_bindings(
+        feature_id: FeatureId,
+        recipe: RecipeRef,
+        game_pack: ModelGamePackRef,
+        truth_snapshot_id: Option<Sha256Digest>,
         mut selected_resources: Vec<ModelResourceRef>,
+        mut context_bindings: Vec<ModelContextBinding>,
         request: ModelRequest,
     ) -> Result<Self, ModelRequestError> {
         selected_resources.sort();
-        let mut snapshot = Self {
+        context_bindings.sort_by(|left, right| {
+            left.role
+                .cmp(&right.role)
+                .then_with(|| left.schema.id.cmp(&right.schema.id))
+                .then_with(|| left.schema.version.cmp(&right.schema.version))
+                .then_with(|| left.sha256.cmp(&right.sha256))
+        });
+        let commitment = commitment_for(
+            MODEL_REQUEST_SNAPSHOT_SCHEMA_VERSION,
+            &feature_id,
+            &recipe,
+            &game_pack,
+            &truth_snapshot_id,
+            &selected_resources,
+            &context_bindings,
+            &request,
+        )?;
+        let request_sha256 = commitment.request_sha256.clone();
+        let snapshot = Self {
             schema_version: MODEL_REQUEST_SNAPSHOT_SCHEMA_VERSION,
             feature_id,
             recipe,
             game_pack,
             truth_snapshot_id,
             selected_resources,
+            context_bindings,
             request,
-            request_sha256: zero_digest(),
+            commitment,
+            request_sha256,
         };
         snapshot.validate_structure()?;
-        snapshot.request_sha256 = snapshot.compute_identity()?;
         Ok(snapshot)
     }
 
     pub fn verify(&self) -> Result<(), ModelRequestError> {
         self.validate_structure()?;
-        if self.compute_identity()? != self.request_sha256 {
+        let commitment = self.compute_commitment()?;
+        if commitment != self.commitment || commitment.request_sha256 != self.request_sha256 {
             return Err(ModelRequestError::IdentityMismatch);
         }
         Ok(())
@@ -226,6 +326,7 @@ impl ModelRequestSnapshot {
     fn validate_structure(&self) -> Result<(), ModelRequestError> {
         if self.schema_version != MODEL_REQUEST_SNAPSHOT_SCHEMA_VERSION
             || self.selected_resources.len() > 64
+            || self.context_bindings.len() > 64
         {
             return Err(ModelRequestError::InvalidSnapshot);
         }
@@ -244,33 +345,45 @@ impl ModelRequestSnapshot {
         {
             return Err(ModelRequestError::InvalidSnapshot);
         }
+        let mut binding_keys = BTreeSet::new();
+        for binding in &self.context_bindings {
+            binding.validate()?;
+            let key = (&binding.role, &binding.schema.id, binding.schema.version);
+            if !binding_keys.insert(key) {
+                return Err(ModelRequestError::DuplicateContextBinding);
+            }
+        }
+        if !self.context_bindings.windows(2).all(|items| {
+            let left = &items[0];
+            let right = &items[1];
+            (
+                left.role.as_str(),
+                &left.schema.id,
+                left.schema.version,
+                &left.sha256,
+            ) <= (
+                right.role.as_str(),
+                &right.schema.id,
+                right.schema.version,
+                &right.sha256,
+            )
+        }) {
+            return Err(ModelRequestError::InvalidSnapshot);
+        }
         Ok(())
     }
 
-    fn compute_identity(&self) -> Result<Sha256Digest, ModelRequestError> {
-        #[derive(Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Identity<'a> {
-            schema_version: u32,
-            feature_id: &'a FeatureId,
-            recipe: &'a RecipeRef,
-            game_pack: &'a ModelGamePackRef,
-            truth_snapshot_id: &'a Option<Sha256Digest>,
-            selected_resources: &'a [ModelResourceRef],
-            request: &'a ModelRequest,
-        }
-
-        let bytes = serde_json::to_vec(&Identity {
-            schema_version: self.schema_version,
-            feature_id: &self.feature_id,
-            recipe: &self.recipe,
-            game_pack: &self.game_pack,
-            truth_snapshot_id: &self.truth_snapshot_id,
-            selected_resources: &self.selected_resources,
-            request: &self.request,
-        })
-        .map_err(|_| ModelRequestError::InvalidSnapshot)?;
-        Ok(sha256_bytes(&bytes))
+    fn compute_commitment(&self) -> Result<ModelRequestCommitment, ModelRequestError> {
+        commitment_for(
+            self.schema_version,
+            &self.feature_id,
+            &self.recipe,
+            &self.game_pack,
+            &self.truth_snapshot_id,
+            &self.selected_resources,
+            &self.context_bindings,
+            &self.request,
+        )
     }
 
     #[must_use]
@@ -299,6 +412,11 @@ impl ModelRequestSnapshot {
     }
 
     #[must_use]
+    pub fn context_bindings(&self) -> &[ModelContextBinding] {
+        &self.context_bindings
+    }
+
+    #[must_use]
     pub fn request(&self) -> &ModelRequest {
         &self.request
     }
@@ -307,40 +425,116 @@ impl ModelRequestSnapshot {
     pub fn request_sha256(&self) -> &Sha256Digest {
         &self.request_sha256
     }
+
+    #[must_use]
+    pub fn commitment(&self) -> &ModelRequestCommitment {
+        &self.commitment
+    }
 }
 
-impl<'de> Deserialize<'de> for ModelRequestSnapshot {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase", deny_unknown_fields)]
-        struct Wire {
-            schema_version: u32,
-            feature_id: FeatureId,
-            recipe: RecipeRef,
-            game_pack: ModelGamePackRef,
-            truth_snapshot_id: Option<Sha256Digest>,
-            selected_resources: Vec<ModelResourceRef>,
-            request: ModelRequest,
-            request_sha256: Sha256Digest,
-        }
+#[allow(clippy::too_many_arguments)]
+fn commitment_for(
+    schema_version: u32,
+    feature_id: &FeatureId,
+    recipe: &RecipeRef,
+    game_pack: &ModelGamePackRef,
+    truth_snapshot_id: &Option<Sha256Digest>,
+    selected_resources: &[ModelResourceRef],
+    context_bindings: &[ModelContextBinding],
+    request: &ModelRequest,
+) -> Result<ModelRequestCommitment, ModelRequestError> {
+    let identity = ModelRequestCommitmentIdentity {
+        schema_version,
+        feature_id: feature_id.clone(),
+        recipe: recipe.clone(),
+        game_pack: game_pack.clone(),
+        truth_snapshot_id: truth_snapshot_id.clone(),
+        selected_resources: selected_resources.to_vec(),
+        context_bindings: context_bindings.to_vec(),
+        rendered_messages_sha256: digest_json(&request.messages)?,
+        output_contract_schema: request.output_contract.schema.clone(),
+        output_contract_sha256: digest_json(&request.output_contract.json_schema)?,
+        max_output_tokens: request.max_output_tokens,
+        temperature_bits: request.temperature.map(f32::to_bits),
+        requested_model: request.model.clone(),
+    };
+    validate_identity(&identity)?;
+    Ok(ModelRequestCommitment {
+        request_sha256: compute_commitment_hash(&identity)?,
+        identity,
+    })
+}
 
-        let wire = Wire::deserialize(deserializer)?;
-        let snapshot = Self {
-            schema_version: wire.schema_version,
-            feature_id: wire.feature_id,
-            recipe: wire.recipe,
-            game_pack: wire.game_pack,
-            truth_snapshot_id: wire.truth_snapshot_id,
-            selected_resources: wire.selected_resources,
-            request: wire.request,
-            request_sha256: wire.request_sha256,
-        };
-        snapshot.verify().map_err(serde::de::Error::custom)?;
-        Ok(snapshot)
+fn validate_identity(identity: &ModelRequestCommitmentIdentity) -> Result<(), ModelRequestError> {
+    if identity.schema_version != MODEL_REQUEST_SNAPSHOT_SCHEMA_VERSION
+        || identity.selected_resources.len() > 64
+        || identity.context_bindings.len() > 64
+        || identity.max_output_tokens == 0
+        || identity.max_output_tokens > MAX_MODEL_OUTPUT_TOKENS
+        || identity.temperature_bits.is_some_and(|bits| {
+            let value = f32::from_bits(bits);
+            !value.is_finite() || !(0.0..=2.0).contains(&value)
+        })
+        || identity.requested_model.as_ref().is_some_and(|value| {
+            value.trim().is_empty() || value.len() > 256 || value.chars().any(char::is_control)
+        })
+    {
+        return Err(ModelRequestError::InvalidSnapshot);
     }
+
+    let mut resource_ids = BTreeSet::new();
+    for resource in &identity.selected_resources {
+        resource.validate()?;
+        if !resource_ids.insert(&resource.resource_id) {
+            return Err(ModelRequestError::DuplicateResource);
+        }
+    }
+    if !identity
+        .selected_resources
+        .windows(2)
+        .all(|items| items[0] < items[1])
+    {
+        return Err(ModelRequestError::InvalidSnapshot);
+    }
+
+    let mut binding_keys = BTreeSet::new();
+    for binding in &identity.context_bindings {
+        binding.validate()?;
+        let key = (&binding.role, &binding.schema.id, binding.schema.version);
+        if !binding_keys.insert(key) {
+            return Err(ModelRequestError::DuplicateContextBinding);
+        }
+    }
+    if !identity.context_bindings.windows(2).all(|items| {
+        let left = &items[0];
+        let right = &items[1];
+        (
+            left.role.as_str(),
+            &left.schema.id,
+            left.schema.version,
+            &left.sha256,
+        ) <= (
+            right.role.as_str(),
+            &right.schema.id,
+            right.schema.version,
+            &right.sha256,
+        )
+    }) {
+        return Err(ModelRequestError::InvalidSnapshot);
+    }
+    Ok(())
+}
+
+fn compute_commitment_hash(
+    identity: &ModelRequestCommitmentIdentity,
+) -> Result<Sha256Digest, ModelRequestError> {
+    let bytes = serde_json::to_vec(identity).map_err(|_| ModelRequestError::InvalidSnapshot)?;
+    Ok(sha256_bytes(&bytes))
+}
+
+fn digest_json<T: Serialize>(value: &T) -> Result<Sha256Digest, ModelRequestError> {
+    let bytes = serde_json::to_vec(value).map_err(|_| ModelRequestError::InvalidSnapshot)?;
+    Ok(sha256_bytes(&bytes))
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq, Default)]
@@ -422,6 +616,10 @@ pub enum ModelRequestError {
     InvalidResource,
     #[error("model request contains a duplicate resource reference")]
     DuplicateResource,
+    #[error("model request contains an invalid context binding")]
+    InvalidContextBinding,
+    #[error("model request contains a duplicate context binding")]
+    DuplicateContextBinding,
     #[error("model request snapshot identity does not match its content")]
     IdentityMismatch,
 }
@@ -469,10 +667,6 @@ fn valid_media_type(value: &str) -> bool {
                     .chain(subtype.bytes())
                     .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'+' | b'-'))
         })
-}
-
-fn zero_digest() -> Sha256Digest {
-    Sha256Digest::parse("0".repeat(64)).expect("fixed placeholder digest is valid")
 }
 
 fn sha256_bytes(bytes: &[u8]) -> Sha256Digest {
@@ -532,7 +726,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_identity_is_canonical_and_verified_on_decode() {
+    fn snapshot_identity_is_canonical_and_commitment_is_verified_on_decode() {
         let first = ModelResourceRef {
             resource_id: ResourceId::parse("resource.zeta").unwrap(),
             logical_role: "log.attachment".into(),
@@ -550,15 +744,21 @@ mod tests {
         assert_eq!(left.request_sha256(), right.request_sha256());
         assert_eq!(left.selected_resources(), right.selected_resources());
 
-        let json = serde_json::to_string(&left).unwrap();
-        assert_eq!(
-            serde_json::from_str::<ModelRequestSnapshot>(&json).unwrap(),
-            left
-        );
+        let json = serde_json::to_string(left.commitment()).unwrap();
+        let decoded: ModelRequestCommitment = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, *left.commitment());
+        decoded.verify().unwrap();
 
-        let mut value = serde_json::to_value(left).unwrap();
-        value["request"]["messages"][0]["content"] = serde_json::json!("tampered");
-        assert!(serde_json::from_value::<ModelRequestSnapshot>(value).is_err());
+        let mut tampered = left.clone();
+        tampered.request.messages[0].content = "tampered".into();
+        assert_eq!(tampered.verify(), Err(ModelRequestError::IdentityMismatch));
+
+        let mut tampered_commitment = left.commitment().clone();
+        tampered_commitment.identity.rendered_messages_sha256 = digest('f');
+        assert_eq!(
+            tampered_commitment.verify(),
+            Err(ModelRequestError::IdentityMismatch)
+        );
     }
 
     #[test]
@@ -608,6 +808,63 @@ mod tests {
         assert_eq!(lower.request().max_output_tokens, 4_096);
         assert_eq!(higher.request().max_output_tokens, 8_192);
         assert_ne!(lower.request_sha256(), higher.request_sha256());
+    }
+
+    #[test]
+    fn context_bindings_are_sorted_and_duplicate_keys_are_rejected() {
+        let schema = SchemaRef {
+            id: SchemaId::parse("feature.fixture-context").unwrap(),
+            version: SchemaVersion::new(1).unwrap(),
+        };
+        let first = ModelContextBinding {
+            role: "human.semantic_feedback".into(),
+            schema: schema.clone(),
+            sha256: digest('d'),
+        };
+        let second = ModelContextBinding {
+            role: "runtime.custom_instructions".into(),
+            schema,
+            sha256: digest('e'),
+        };
+        let snapshot = ModelRequestSnapshot::new_with_bindings(
+            FeatureId::parse("fixture.analyze").unwrap(),
+            RecipeRef {
+                id: RecipeId::parse("recipe.fixture-analyze").unwrap(),
+                version: SchemaVersion::new(1).unwrap(),
+                sha256: digest('a'),
+            },
+            ModelGamePackRef {
+                id: GamePackId::parse("fixture-game").unwrap(),
+                sha256: digest('b'),
+            },
+            None,
+            Vec::new(),
+            vec![first.clone(), second.clone()],
+            request(Vec::new()).request,
+        )
+        .unwrap();
+        assert_eq!(snapshot.context_bindings()[0], first);
+        assert_eq!(snapshot.context_bindings()[1], second);
+
+        assert_eq!(
+            ModelRequestSnapshot::new_with_bindings(
+                FeatureId::parse("fixture.analyze").unwrap(),
+                RecipeRef {
+                    id: RecipeId::parse("recipe.fixture-analyze").unwrap(),
+                    version: SchemaVersion::new(1).unwrap(),
+                    sha256: digest('a'),
+                },
+                ModelGamePackRef {
+                    id: GamePackId::parse("fixture-game").unwrap(),
+                    sha256: digest('b'),
+                },
+                None,
+                Vec::new(),
+                vec![first.clone(), first],
+                request(Vec::new()).request,
+            ),
+            Err(ModelRequestError::DuplicateContextBinding)
+        );
     }
 
     #[test]

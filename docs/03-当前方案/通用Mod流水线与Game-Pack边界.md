@@ -508,7 +508,7 @@ Provider foundation 的跨 crate cutover 和机器门禁已完成，但后续 `r
 - 操作真实游戏 UI；
 - 删除旧 schema 数据或任何历史验证证据。
 
-当前 Pack v5 和 ExecutionGraph v5 已完成破坏性升级，但该允许不等同于删除历史 evidence；旧目录保持只读证据，不做兼容读取。
+当前 Pack v5 和 ExecutionGraph v6 已完成破坏性升级，但该允许不等同于删除历史 evidence；旧目录保持只读证据，不做兼容读取。
 
 ## 15. 完成定义
 

@@ -38,16 +38,14 @@ pub struct StagedCompositionGenerateExecution {
 pub struct CompositionAdjustmentItem {
     pub item_id: ItemId,
     pub definition_hash: Sha256Digest,
+    pub behavior_sha256: Sha256Digest,
 }
 
 pub fn composition_adjustment_items(
     graph: &ExecutionGraphRecord,
 ) -> Result<Vec<CompositionAdjustmentItem>, CompositionGenerateError> {
     if graph.owner_feature_id() != &CompositionGenerateFeature::id()
-        || !matches!(
-            graph.status(),
-            ExecutionGraphStatus::Paused | ExecutionGraphStatus::Succeeded
-        )
+        || !matches!(graph.status(), ExecutionGraphStatus::Succeeded)
         || graph.repair_campaign().is_some()
     {
         return Ok(Vec::new());
@@ -57,14 +55,31 @@ pub fn composition_adjustment_items(
         .payload
         .decode(&blueprint_schema())
         .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
-    Ok(blueprint
+    blueprint
         .items
         .into_iter()
-        .map(|item| CompositionAdjustmentItem {
-            item_id: item.item_id,
-            definition_hash: item.definition_hash,
-        })
-        .collect())
+        .map(
+            |item| -> Result<CompositionAdjustmentItem, CompositionGenerateError> {
+                let behavior_sha256 = graph
+                    .nodes()
+                    .get(&item.behavior_node_id)
+                    .and_then(|node| node.active_checkpoint.as_ref())
+                    .and_then(|checkpoint| {
+                        checkpoint
+                            .payload
+                            .decode::<StagedBehaviorCheckpoint>(&behavior_checkpoint_schema())
+                            .ok()
+                    })
+                    .map(|checkpoint| checkpoint.behavior_sha256)
+                    .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
+                Ok(CompositionAdjustmentItem {
+                    item_id: item.item_id,
+                    definition_hash: item.definition_hash,
+                    behavior_sha256,
+                })
+            },
+        )
+        .collect::<Result<Vec<_>, _>>()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -138,7 +153,7 @@ struct StagedBehaviorCheckpoint {
     catalog: CapabilityCatalogIdentity,
     adapter: BehaviorAdapterIdentity,
     definition_hash: Sha256Digest,
-    request_snapshot: ats_runtime::ModelRequestSnapshot,
+    request_commitment: ats_runtime::ModelRequestCommitment,
     response_model: String,
     usage: ats_runtime::TokenUsage,
     behavior_sha256: Sha256Digest,
@@ -300,20 +315,18 @@ impl CompositionGenerateService<'_> {
 
     pub fn prepare_staged_adjustment(
         &self,
-        mut graph: ExecutionGraphRecord,
+        graph: ExecutionGraphRecord,
         expected_revision: u64,
         run_id: RunId,
-        adjustment: ItemAdjustment,
+        adjustment: HumanSemanticFeedbackRef,
         context: CompositionGenerateContext<'_>,
     ) -> Result<StagedCompositionGenerateStart, CompositionGenerateError> {
         validate_context(&context)?;
         adjustment.validate()?;
         if graph.owner_feature_id() != &CompositionGenerateFeature::id()
             || graph.revision() != expected_revision
-            || !matches!(
-                graph.status(),
-                ExecutionGraphStatus::Paused | ExecutionGraphStatus::Succeeded
-            )
+            || graph.status() != ExecutionGraphStatus::Succeeded
+            || adjustment.source_execution_graph_id != *graph.id()
         {
             return Err(CompositionGenerateError::AdjustmentRequiresReplan);
         }
@@ -337,10 +350,16 @@ impl CompositionGenerateService<'_> {
             .ok_or(CompositionGenerateError::InvalidCheckpoint)?
             .sha256
             .clone();
-        let source_run_id = graph
-            .previous_run_id()
-            .cloned()
-            .ok_or(CompositionGenerateError::ExecutionGraphConflict)?;
+        let behavior_checkpoint: StagedBehaviorCheckpoint = graph.nodes()[&item.behavior_node_id]
+            .active_checkpoint
+            .as_ref()
+            .ok_or(CompositionGenerateError::InvalidCheckpoint)?
+            .payload
+            .decode(&behavior_checkpoint_schema())
+            .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
+        if behavior_checkpoint.behavior_sha256 != adjustment.expected_behavior_sha256 {
+            return Err(CompositionGenerateError::AdjustmentStale);
+        }
         let feedback = VersionedPayload::from_typed(item_adjustment_schema(), &adjustment)?;
         let runtime_adjustment = ExecutionAdjustment {
             item_id: adjustment.item_id.clone(),
@@ -362,25 +381,6 @@ impl CompositionGenerateService<'_> {
             feedback,
         };
         match graph.status() {
-            ExecutionGraphStatus::Paused if graph.repair_campaign().is_none() => {
-                graph
-                    .claim_adjustment(
-                        expected_revision,
-                        run_id,
-                        source_run_id.clone(),
-                        instruction_sha256,
-                        target,
-                        runtime_adjustment,
-                        Utc::now(),
-                    )
-                    .map_err(|_| CompositionGenerateError::ExecutionGraphConflict)?;
-                request.execution = Some(CompositionGenerateExecutionRequest::Resume {
-                    execution_graph_id: graph.id().clone(),
-                    expected_revision,
-                    previous_run_id: source_run_id,
-                });
-                Ok(StagedCompositionGenerateStart { request, graph })
-            }
             ExecutionGraphStatus::Succeeded => {
                 let execution_graph_id = ExecutionGraphId::new();
                 request.execution = Some(CompositionGenerateExecutionRequest::Start {
@@ -411,7 +411,7 @@ impl CompositionGenerateService<'_> {
         }
     }
 
-    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute_staged<C, I, R, W, S, V, A, B, P, G, RR>(
         &self,
         dependencies: CompositionGenerateDependencies<'_, C, I, R, W, S, V, A, B, P>,
@@ -420,6 +420,44 @@ impl CompositionGenerateService<'_> {
         run: &mut RunRecord,
         request: CompositionGenerateRequest,
         context: CompositionGenerateContext<'_>,
+        cancellation: &CancellationToken,
+    ) -> Result<StagedCompositionGenerateExecution, CompositionGenerateError>
+    where
+        C: ModelClient + ?Sized,
+        I: ItemRepository + ?Sized,
+        R: ResourceRepository + ?Sized,
+        W: ProjectFileWriter + ?Sized,
+        S: ProjectStager + ?Sized,
+        V: ValidationRunner + ?Sized,
+        A: ArtifactPublisher + ?Sized,
+        B: BuildRunner + ?Sized,
+        P: PackageWriter + ?Sized,
+        G: ExecutionGraphRepository + ?Sized,
+        RR: RunRepository + ?Sized,
+    {
+        self.execute_staged_with_input(
+            dependencies,
+            runs,
+            graphs,
+            run,
+            request,
+            context,
+            EphemeralCompositionInput::None,
+            cancellation,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+    pub async fn execute_staged_with_input<C, I, R, W, S, V, A, B, P, G, RR>(
+        &self,
+        dependencies: CompositionGenerateDependencies<'_, C, I, R, W, S, V, A, B, P>,
+        runs: &RR,
+        graphs: &G,
+        run: &mut RunRecord,
+        request: CompositionGenerateRequest,
+        context: CompositionGenerateContext<'_>,
+        ephemeral_input: EphemeralCompositionInput,
         cancellation: &CancellationToken,
     ) -> Result<StagedCompositionGenerateExecution, CompositionGenerateError>
     where
@@ -465,7 +503,10 @@ impl CompositionGenerateService<'_> {
             Some(CompositionGenerateExecutionRequest::Start { .. })
                 if request.adjustment.is_some()
                     && graph.repair_campaign().is_some_and(|campaign| {
-                        campaign.adjustment.is_some() && campaign.targets.len() == 1
+                        matches!(
+                            &campaign.cause,
+                            ats_runtime::RepairCause::HumanSemanticFeedback { .. }
+                        ) && campaign.targets.len() == 1
                     }) => {}
             Some(CompositionGenerateExecutionRequest::Resume {
                 previous_run_id, ..
@@ -623,6 +664,7 @@ impl CompositionGenerateService<'_> {
                             model: context.model.clone(),
                             model_request_limits: blueprint.model_request_limits,
                             feedback: feedback.as_ref(),
+                            human_semantic_feedback: None,
                         };
                         let snapshot = behavior.prepare(&behavior_context)?;
                         if first_request {
@@ -745,7 +787,7 @@ impl CompositionGenerateService<'_> {
                         catalog: context.pack.capability_catalog_identity().clone(),
                         adapter: context.pack.behavior_adapter().clone(),
                         definition_hash: definition.definition_hash.clone(),
-                        request_snapshot: generated.request_snapshot,
+                        request_commitment: generated.request_snapshot.commitment().clone(),
                         response_model: generated.response_model,
                         usage: generated.usage,
                         behavior_sha256,
@@ -837,6 +879,7 @@ impl CompositionGenerateService<'_> {
                 &context,
                 &resolved,
                 &blueprint,
+                &ephemeral_input,
                 cancellation,
             )
             .await?;
@@ -948,6 +991,7 @@ impl CompositionGenerateService<'_> {
         context: &CompositionGenerateContext<'_>,
         resolved: &ResolvedItemGraph,
         blueprint: &StagedCompositionGenerateBlueprint,
+        ephemeral_input: &EphemeralCompositionInput,
         cancellation: &CancellationToken,
     ) -> Result<(), CompositionGenerateError>
     where
@@ -959,6 +1003,15 @@ impl CompositionGenerateService<'_> {
             .adjustment
             .as_ref()
             .ok_or(CompositionGenerateError::AdjustmentInvalid)?;
+        ephemeral_input.validate_for(adjustment)?;
+        let instruction = match ephemeral_input {
+            EphemeralCompositionInput::HumanSemanticFeedback { instruction, .. } => {
+                instruction.trim()
+            }
+            EphemeralCompositionInput::None => {
+                return Err(CompositionGenerateError::FeedbackInputUnavailable);
+            }
+        };
         let campaign = graph
             .repair_campaign()
             .cloned()
@@ -968,7 +1021,7 @@ impl CompositionGenerateService<'_> {
             .first()
             .filter(|_| campaign.targets.len() == 1)
             .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
-        let persisted_adjustment: ItemAdjustment = target
+        let persisted_adjustment: HumanSemanticFeedbackRef = target
             .feedback
             .payload
             .decode(&item_adjustment_schema())
@@ -985,12 +1038,17 @@ impl CompositionGenerateService<'_> {
         if &persisted_adjustment != adjustment
             || adjustment.item_id != definition.definition.item_id
             || adjustment.expected_definition_hash != definition.definition_hash
-            || campaign.adjustment.as_ref().is_none_or(|value| {
-                value.item_id != adjustment.item_id
-                    || value.expected_definition_hash != adjustment.expected_definition_hash
-                    || value.instruction_sha256 != adjustment.instruction_sha256
-                    || value.feedback.sha256 != target.feedback.sha256
-            })
+            || !matches!(
+                &campaign.cause,
+                ats_runtime::RepairCause::HumanSemanticFeedback {
+                    item_id,
+                    expected_definition_hash,
+                    instruction_sha256,
+                    ..
+                } if item_id == &adjustment.item_id
+                    && expected_definition_hash == &adjustment.expected_definition_hash
+                    && instruction_sha256 == &adjustment.instruction_sha256
+            )
         {
             return Err(CompositionGenerateError::InvalidCheckpoint);
         }
@@ -1027,10 +1085,11 @@ impl CompositionGenerateService<'_> {
                     definition,
                     plan: &plan.plan,
                     project_context: context.project_context,
-                    custom_instructions: Some(&adjustment.instruction),
+                    custom_instructions: None,
                     model: context.model.clone(),
                     model_request_limits: blueprint.model_request_limits,
                     feedback: feedback.as_ref(),
+                    human_semantic_feedback: Some(instruction),
                 };
                 let snapshot = behavior_service.prepare(&behavior_context)?;
                 match behavior_service
@@ -1122,13 +1181,13 @@ impl CompositionGenerateService<'_> {
                 catalog: context.pack.capability_catalog_identity().clone(),
                 adapter: context.pack.behavior_adapter().clone(),
                 definition_hash: definition.definition_hash.clone(),
-                request_snapshot: generated.request_snapshot,
+                request_commitment: generated.request_snapshot.commitment().clone(),
                 response_model: generated.response_model,
                 usage: generated.usage,
                 behavior_sha256,
                 proposal: generated.proposal,
             };
-            let request_sha256 = checkpoint.request_snapshot.request_sha256().clone();
+            let request_sha256 = checkpoint.request_commitment.request_sha256().clone();
             let payload = VersionedPayload::from_typed(behavior_checkpoint_schema(), &checkpoint)?;
             mutate_graph(graph, graphs, |graph| {
                 graph.complete_repair_target_with_request(
@@ -1866,7 +1925,7 @@ fn restore_rendered_assembly<R: RunRepository + ?Sized>(
             truth_snapshot_id: behavior.truth_snapshot_id.clone(),
             catalog: behavior.catalog.clone(),
             adapter: behavior.adapter.clone(),
-            model_request_sha256: behavior.request_snapshot.request_sha256().clone(),
+            model_request_sha256: behavior.request_commitment.request_sha256().clone(),
             behavior_sha256: behavior.behavior_sha256.clone(),
             rendered_bundle_sha256: render.rendered_bundle_sha256.clone(),
             model: behavior.response_model.clone(),
@@ -1876,7 +1935,7 @@ fn restore_rendered_assembly<R: RunRepository + ?Sized>(
             item_id: definition.definition.item_id.clone(),
             definition_hash: definition.definition_hash.clone(),
             plan_run_id: plan.child_run.id().clone(),
-            behavior_request_sha256: behavior.request_snapshot.request_sha256().clone(),
+            behavior_request_sha256: behavior.request_commitment.request_sha256().clone(),
             behavior_sha256: behavior.behavior_sha256,
             rendered_bundle_sha256: render.rendered_bundle_sha256,
             adapter: behavior.adapter,
@@ -1972,7 +2031,7 @@ fn decode_behavior_checkpoint(
         .get(&item.behavior_node_id)
         .ok_or(CompositionGenerateError::InvalidCheckpoint)?;
     checkpoint
-        .request_snapshot
+        .request_commitment
         .verify()
         .map_err(|_| CompositionGenerateError::InvalidCheckpoint)?;
     checkpoint
@@ -1991,11 +2050,16 @@ fn decode_behavior_checkpoint(
         || checkpoint.proposal.catalog != checkpoint.catalog
         || checkpoint.proposal.adapter != checkpoint.adapter
         || checkpoint.proposal.sha256().ok().as_ref() != Some(&checkpoint.behavior_sha256)
-        || checkpoint.request_snapshot.feature_id() != &CompositionGenerateFeature::id()
-        || checkpoint.request_snapshot.game_pack().id != checkpoint.pack_id
-        || checkpoint.request_snapshot.game_pack().sha256 != checkpoint.pack_sha256
-        || checkpoint.request_snapshot.truth_snapshot_id() != Some(&checkpoint.truth_snapshot_id)
-        || checkpoint.request_snapshot.request_sha256() != &node.request_snapshot_hash
+        || checkpoint.request_commitment.identity.feature_id != CompositionGenerateFeature::id()
+        || checkpoint.request_commitment.identity.game_pack.id != checkpoint.pack_id
+        || checkpoint.request_commitment.identity.game_pack.sha256 != checkpoint.pack_sha256
+        || checkpoint
+            .request_commitment
+            .identity
+            .truth_snapshot_id
+            .as_ref()
+            != Some(&checkpoint.truth_snapshot_id)
+        || checkpoint.request_commitment.request_sha256() != &node.request_snapshot_hash
         || checkpoint.response_model.trim().is_empty()
         || checkpoint.response_model.chars().count() > 256
         || checkpoint.response_model.contains('\0')
@@ -2431,7 +2495,7 @@ fn succeed_parent(
 }
 
 fn blueprint_schema() -> SchemaRef {
-    schema_version(BLUEPRINT_SCHEMA_ID, 8)
+    schema_version(BLUEPRINT_SCHEMA_ID, 9)
 }
 
 fn item_adjustment_schema() -> SchemaRef {
@@ -2443,7 +2507,7 @@ fn plan_checkpoint_schema() -> SchemaRef {
 }
 
 fn behavior_checkpoint_schema() -> SchemaRef {
-    schema(BEHAVIOR_CHECKPOINT_SCHEMA_ID)
+    schema_version(BEHAVIOR_CHECKPOINT_SCHEMA_ID, 2)
 }
 
 fn behavior_feedback_schema() -> SchemaRef {

@@ -58,7 +58,7 @@ impl FeatureSpec for CompositionGenerateFeature {
     }
 
     fn request_schema() -> SchemaRef {
-        schema_version("feature.composition-generate-request", 6)
+        schema_version("feature.composition-generate-request", 7)
     }
 
     fn result_schema() -> SchemaRef {
@@ -92,34 +92,58 @@ pub struct CompositionGenerateRequest {
     pub package: Option<ProjectPackageRequest>,
     pub repair_policy: RepairPolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub adjustment: Option<ItemAdjustment>,
+    pub adjustment: Option<HumanSemanticFeedbackRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<CompositionGenerateExecutionRequest>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ItemAdjustment {
+pub struct HumanSemanticFeedbackRef {
+    pub source_execution_graph_id: ExecutionGraphId,
+    pub source_revision: u64,
     pub item_id: ats_kernel::ItemId,
     pub expected_definition_hash: Sha256Digest,
-    pub instruction: String,
+    pub expected_behavior_sha256: Sha256Digest,
     pub instruction_sha256: Sha256Digest,
     pub created_at: chrono::DateTime<Utc>,
 }
 
-impl ItemAdjustment {
+impl HumanSemanticFeedbackRef {
     pub fn new(
         item_id: ats_kernel::ItemId,
         expected_definition_hash: Sha256Digest,
         instruction: impl Into<String>,
         created_at: chrono::DateTime<Utc>,
     ) -> Result<Self, CompositionGenerateError> {
+        Self::new_for_source(
+            ExecutionGraphId::parse("legacy-source").expect("valid legacy graph ID"),
+            1,
+            item_id,
+            expected_definition_hash,
+            zero_digest(),
+            instruction,
+            created_at,
+        )
+    }
+
+    pub fn new_for_source(
+        source_execution_graph_id: ExecutionGraphId,
+        source_revision: u64,
+        item_id: ats_kernel::ItemId,
+        expected_definition_hash: Sha256Digest,
+        expected_behavior_sha256: Sha256Digest,
+        instruction: impl Into<String>,
+        created_at: chrono::DateTime<Utc>,
+    ) -> Result<Self, CompositionGenerateError> {
         let instruction = instruction.into().trim().to_owned();
         let value = Self {
+            source_execution_graph_id,
+            source_revision,
             instruction_sha256: digest_text(&instruction)?,
             item_id,
             expected_definition_hash,
-            instruction,
+            expected_behavior_sha256,
             created_at,
         };
         value.validate()?;
@@ -127,15 +151,42 @@ impl ItemAdjustment {
     }
 
     fn validate(&self) -> Result<(), CompositionGenerateError> {
-        if self.instruction.is_empty()
-            || self.instruction.chars().count() > 4_000
-            || self.instruction.contains('\0')
-            || self.instruction.trim() != self.instruction
-            || digest_text(&self.instruction)? != self.instruction_sha256
-        {
+        if self.source_revision == 0 {
             Err(CompositionGenerateError::AdjustmentInvalid)
         } else {
             Ok(())
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum EphemeralCompositionInput {
+    None,
+    HumanSemanticFeedback {
+        feedback_ref: HumanSemanticFeedbackRef,
+        instruction: String,
+    },
+}
+
+impl EphemeralCompositionInput {
+    pub fn validate_for(
+        &self,
+        feedback_ref: &HumanSemanticFeedbackRef,
+    ) -> Result<(), CompositionGenerateError> {
+        match self {
+            Self::None => Err(CompositionGenerateError::FeedbackInputUnavailable),
+            Self::HumanSemanticFeedback {
+                feedback_ref: actual,
+                instruction,
+            } if actual == feedback_ref
+                && !instruction.trim().is_empty()
+                && instruction.chars().count() <= 4_000
+                && !instruction.contains('\0')
+                && digest_text(instruction.trim())? == feedback_ref.instruction_sha256 =>
+            {
+                Ok(())
+            }
+            Self::HumanSemanticFeedback { .. } => Err(CompositionGenerateError::AdjustmentInvalid),
         }
     }
 }
@@ -371,6 +422,8 @@ pub enum CompositionGenerateError {
     AdjustmentStale,
     #[error("composition adjustment requires a new composition plan")]
     AdjustmentRequiresReplan,
+    #[error("human semantic feedback input is unavailable in this execution")]
+    FeedbackInputUnavailable,
     #[error("composition generation was cancelled")]
     Cancelled,
     #[error(transparent)]
@@ -451,6 +504,10 @@ impl CompositionGenerateError {
             ),
             Self::AdjustmentRequiresReplan => (
                 "composition.adjustment.requires_replan",
+                "composition.generate.adjustment",
+            ),
+            Self::FeedbackInputUnavailable => (
+                "composition.feedback.input_unavailable",
                 "composition.generate.adjustment",
             ),
             Self::Cancelled => ("run.cancelled", "composition.generate.execute"),
@@ -617,13 +674,17 @@ fn validate_request(request: &CompositionGenerateRequest) -> Result<(), Composit
         request
             .adjustment
             .as_ref()
-            .map_or(Ok(()), ItemAdjustment::validate)
+            .map_or(Ok(()), HumanSemanticFeedbackRef::validate)
     }
 }
 
 fn digest_text(value: &str) -> Result<Sha256Digest, CompositionGenerateError> {
     Sha256Digest::parse(format!("{:x}", Sha256::digest(value.as_bytes())))
         .map_err(|_| CompositionGenerateError::AdjustmentInvalid)
+}
+
+fn zero_digest() -> Sha256Digest {
+    Sha256Digest::parse("0".repeat(64)).expect("fixed placeholder digest is valid")
 }
 
 fn running_run<F, T>(request: &T) -> Result<RunRecord, CompositionGenerateError>

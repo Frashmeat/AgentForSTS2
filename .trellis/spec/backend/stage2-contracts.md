@@ -148,7 +148,7 @@ pub struct PipelineNode {
 - Blueprint v8 persists the complete resolved pipeline, compiled trusted Prepare executor and
   Graph-pinned `ModelRequestLimits`.
   Prepare output schemas equal the exact persisted checkpoint schemas; data-only may directly
-  produce the common finalize checkpoint without Plan/Behavior/Render. ExecutionGraph v5 owns
+  produce the common finalize checkpoint without Plan/Behavior/Render. ExecutionGraph v6 owns
   Plan/Behavior/Render checkpoints, typed feedback and the one graph-level validation/commit state
   machine; Provider execution must not introduce another transaction or recovery runtime.
 - STS2 lives in `ats-game-sts2`. Provider v2 owns Plan/Behavior/Render/finalize, registered
@@ -698,7 +698,7 @@ ResolvedItemGraph
 ```
 
 - Preflight binds exact Pack v5, Truth v2, Catalog, Adapter, root/Draft/profile and definition hashes.
-- Behavior checkpoint v1 binds ModelRequestSnapshot and normalized Behavior hashes.
+- Behavior checkpoint v2 binds ModelRequestCommitment and normalized Behavior hashes.
 - Render checkpoint v1 binds `RenderedItemBundle`, Adapter identity and every file hash.
 - Finalize checkpoint v3 contains the complete deterministic closure.
 - No node writes the real project before registered validation, Build and Package succeed.

@@ -2,6 +2,7 @@
 
 mod static_files;
 
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -77,6 +78,7 @@ async fn main() -> anyhow::Result<()> {
     let host = args
         .host
         .unwrap_or_else(|| settings.runtime.web.host.clone());
+    validate_web_bind_host(&host)?;
     let port = args.port.unwrap_or(settings.runtime.web.port);
     let cors_origins = settings.runtime.web.cors_origins.clone();
     let allow_loopback = settings.runtime.web.allow_loopback_origins;
@@ -117,6 +119,29 @@ fn build_cors_layer(cors_origins: &[String], allow_loopback: bool) -> CorsLayer 
         .allow_methods([Method::GET])
         .allow_headers([header::CONTENT_TYPE])
         .allow_origin(origin)
+}
+
+fn validate_web_bind_host(host: &str) -> anyhow::Result<()> {
+    if is_loopback_bind_host(host) {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "ats-web refuses non-loopback bind host {host:?} until Web authentication and Workspace authorization are enabled"
+    );
+}
+
+fn is_loopback_bind_host(host: &str) -> bool {
+    let trimmed = host.trim();
+    if trimmed.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    let unbracketed = trimmed
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(trimmed);
+    unbracketed
+        .parse::<IpAddr>()
+        .is_ok_and(|address| address.is_loopback())
 }
 
 fn is_loopback_origin(origin: &str) -> bool {
@@ -177,5 +202,16 @@ mod tests {
         assert!(is_loopback_origin("http://127.0.0.1:5173"));
         assert!(is_loopback_origin("http://[::1]:8080"));
         assert!(!is_loopback_origin("http://127.0.0.1.evil.example"));
+    }
+
+    #[test]
+    fn web_bind_host_is_loopback_only_before_auth_is_available() {
+        assert!(validate_web_bind_host("127.0.0.1").is_ok());
+        assert!(validate_web_bind_host("::1").is_ok());
+        assert!(validate_web_bind_host("[::1]").is_ok());
+        assert!(validate_web_bind_host("localhost").is_ok());
+        assert!(validate_web_bind_host("0.0.0.0").is_err());
+        assert!(validate_web_bind_host("::").is_err());
+        assert!(validate_web_bind_host("192.168.1.10").is_err());
     }
 }

@@ -26,7 +26,7 @@ export interface ExecutionGraphView {
   canPause: boolean;
   canResume: boolean;
   canCancel: boolean;
-  adjustableItems: Array<{ itemId: string; definitionHash: string }>;
+  adjustableItems: Array<{ itemId: string; definitionHash: string; behaviorSha256: string }>;
 }
 
 export function isExecutionGraphView(value: unknown): value is ExecutionGraphView {
@@ -75,7 +75,9 @@ export function isExecutionGraphView(value: unknown): value is ExecutionGraphVie
       typeof item.itemId === "string" &&
       /^[a-z][a-z0-9_.-]{0,127}$/.test(item.itemId) &&
       typeof item.definitionHash === "string" &&
-      /^[0-9a-f]{64}$/.test(item.definitionHash)
+      /^[0-9a-f]{64}$/.test(item.definitionHash) &&
+      typeof item.behaviorSha256 === "string" &&
+      /^[0-9a-f]{64}$/.test(item.behaviorSha256)
     )
   );
 }

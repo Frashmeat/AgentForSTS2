@@ -416,11 +416,14 @@ export function CompositionStudioPage() {
     setBusy(true);
     setFailure(null);
     try {
-      const runId = await api.adjustCompositionItem({
+      const item = executionGraph.adjustableItems.find((value) => value.itemId === itemId);
+      if (!item) return;
+      const runId = await api.submitCompositionItemFeedback({
         executionGraphId: executionGraph.executionGraphId,
         expectedRevision: executionGraph.revision,
         itemId,
         expectedDefinitionHash: definitionHash,
+        expectedBehaviorSha256: item.behaviorSha256,
         instruction,
       });
       setLastGenerationRun(null);
@@ -588,9 +591,12 @@ export function CompositionStudioPage() {
           )}
           {lastGenerationRun.status === "succeeded" && executionGraph?.status === "succeeded" && (
             <div className="space-y-3" data-testid="composition-adjustments">
+              <Notice variant="ok" title="Machine checks passed.">
+                Verify behavior in the real game before accepting it. Use feedback only for a behavior mismatch; edit the Item design for intentional design changes.
+              </Notice>
               {executionGraph.adjustableItems.map((item) => (
                 <div key={`${item.itemId}:${item.definitionHash}`} className="border-t border-rule-soft pt-3">
-                  <Field label={item.itemId} hint="Describe the change you want for this item.">
+                    <Field label={item.itemId} hint="Describe the behavior mismatch you observed in the real game.">
                     <textarea
                       data-testid={`composition-adjustment-${item.itemId}`}
                       className="min-h-20"
@@ -608,7 +614,7 @@ export function CompositionStudioPage() {
                     disabled={busy || !(adjustmentInstructions[item.itemId]?.trim())}
                     onClick={() => void adjustGeneratedItem(item.itemId, item.definitionHash)}
                   >
-                    <RefreshCw size={13} /> Regenerate item
+                    <RefreshCw size={13} /> Submit feedback and regenerate this item
                   </Button>
                 </div>
               ))}

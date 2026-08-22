@@ -6,8 +6,9 @@ use ats_game_context::{
 };
 use ats_kernel::{FailureCode, SchemaId, SchemaRef, SchemaVersion, Sha256Digest};
 use ats_runtime::{
-    CancellationToken, FinishReason, ModelClient, ModelError, ModelGamePackRef,
-    ModelOutputContract, ModelRequestError, ModelRequestSnapshot, RunFailure, TokenUsage,
+    CancellationToken, FinishReason, ModelClient, ModelContextBinding, ModelError,
+    ModelGamePackRef, ModelOutputContract, ModelRequestError, ModelRequestSnapshot, RunFailure,
+    TokenUsage,
 };
 use ats_workspace::StoredItemDefinition;
 use serde::{Deserialize, Serialize};
@@ -20,7 +21,7 @@ use crate::mod_plan::PlanItem;
 use crate::prompt::{FeatureRecipe, FeatureRecipeError, FeatureRecipeLoader};
 
 const RECIPE_BYTES: &[u8] = include_bytes!("../../recipes/composition-behavior.json");
-const RECIPE_SHA256: &str = "557c3dbb1f1d09f65e3ca9b8d774a710d37751310e8fcfd71de9c89af4ba4232";
+const RECIPE_SHA256: &str = "f663de38fa0c7cdd394b950949b59756379629047d4072602618773948813608";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -46,6 +47,7 @@ pub(super) struct BehaviorGenerationContext<'a> {
     pub model: Option<String>,
     pub model_request_limits: ats_runtime::ModelRequestLimits,
     pub feedback: Option<&'a BehaviorFeedback>,
+    pub human_semantic_feedback: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -140,6 +142,10 @@ impl BehaviorGenerationService {
                     .feedback
                     .map_or_else(|| Ok(String::new()), serialize)?,
             ),
+            (
+                "human.semantic_feedback".into(),
+                bounded(context.human_semantic_feedback.unwrap_or(""), 4_000)?,
+            ),
         ]);
         let request = self.recipe.render_with_output_contract(
             &slots,
@@ -147,7 +153,22 @@ impl BehaviorGenerationService {
             output_contract,
             &context.model_request_limits,
         )?;
-        Ok(ModelRequestSnapshot::new(
+        let context_bindings = context
+            .human_semantic_feedback
+            .map(|_| {
+                vec![ModelContextBinding {
+                    role: "human.semantic_feedback".into(),
+                    schema: SchemaRef {
+                        id: SchemaId::parse("feature.human-semantic-feedback")
+                            .expect("built-in schema ID is valid"),
+                        version: SchemaVersion::new(1).expect("built-in schema version is valid"),
+                    },
+                    sha256: candidate_sha256(context.human_semantic_feedback.unwrap_or_default())
+                        .expect("bounded feedback has a valid digest"),
+                }]
+            })
+            .unwrap_or_default();
+        Ok(ModelRequestSnapshot::new_with_bindings(
             CompositionGenerateFeature::id(),
             self.recipe.recipe_ref(),
             ModelGamePackRef {
@@ -156,6 +177,7 @@ impl BehaviorGenerationService {
             },
             Some(context.truth_snapshot_id.clone()),
             Vec::new(),
+            context_bindings,
             request,
         )?)
     }

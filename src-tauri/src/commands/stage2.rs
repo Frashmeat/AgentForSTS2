@@ -12,7 +12,7 @@ use ats_features::composition::{
 };
 use ats_features::composition_generate::{
     CompositionAdjustmentItem, CompositionGenerateFeature, CompositionGenerateRequest,
-    ItemAdjustment, composition_adjustment_items,
+    EphemeralCompositionInput, HumanSemanticFeedbackRef, composition_adjustment_items,
 };
 use ats_features::composition_plan::{
     CompositionPlanFeature, CompositionPlanRequest, CompositionRetryNodeFeature,
@@ -99,6 +99,7 @@ pub struct AdjustCompositionItemRequest {
     pub expected_revision: u64,
     pub item_id: ItemId,
     pub expected_definition_hash: Sha256Digest,
+    pub expected_behavior_sha256: Sha256Digest,
     pub instruction: String,
 }
 
@@ -320,6 +321,11 @@ pub async fn resume_execution_graph(
     let graph = graphs
         .get(&id)
         .map_err(|_| CommandFailure::storage("execution.resume"))?;
+    if graph.requires_ephemeral_input() {
+        return Err(CommandFailure::composition_feedback_input_unavailable(
+            "execution.resume",
+        ));
+    }
     let run_id = RunId::new();
     let owner = graph.owner_feature_id().clone();
     let (run, claimed_graph) = if owner == CompositionPlanFeature::id() {
@@ -416,7 +422,7 @@ pub async fn resume_execution_graph(
 }
 
 #[tauri::command]
-pub async fn adjust_composition_item(
+pub async fn submit_composition_item_feedback(
     active: State<'_, ActiveProject>,
     composition: State<'_, Arc<Stage2Composition>>,
     config: State<'_, Arc<AppConfig>>,
@@ -434,12 +440,15 @@ pub async fn adjust_composition_item(
             "composition.adjustment",
         ));
     }
-    let derived = source.status() == ExecutionGraphStatus::Succeeded;
     let run_id = RunId::new();
-    let adjustment = ItemAdjustment::new(
+    let instruction = request.instruction.trim().to_owned();
+    let adjustment = HumanSemanticFeedbackRef::new_for_source(
+        source.id().clone(),
+        source.revision(),
         request.item_id,
         request.expected_definition_hash,
-        request.instruction,
+        request.expected_behavior_sha256,
+        instruction.clone(),
         chrono::Utc::now(),
     )
     .map_err(|_| CommandFailure::composition_adjustment_invalid("composition.adjustment"))?;
@@ -448,10 +457,14 @@ pub async fn adjust_composition_item(
             source,
             request.expected_revision,
             run_id.clone(),
-            adjustment,
+            adjustment.clone(),
             session.path(),
         )
         .map_err(map_adjustment_prepare_failure)?;
+    let ephemeral_input = EphemeralCompositionInput::HumanSemanticFeedback {
+        feedback_ref: adjustment,
+        instruction,
+    };
     let payload = VersionedPayload::from_typed(
         CompositionGenerateFeature::request_schema(),
         &staged.request,
@@ -466,30 +479,28 @@ pub async fn adjust_composition_item(
     let items = session.item_repository();
     let drafts = session.composition_draft_repository();
     let worker_graphs = Arc::clone(&graphs);
-    let worker = move |run, cancellation, repository: Arc<dyn RunRepository>| async move {
-        composition
-            .execute(
-                &config,
-                &root,
-                &meta,
-                run,
-                repository.as_ref(),
-                items.as_ref(),
-                drafts.as_ref(),
-                worker_graphs.as_ref(),
-                resources.as_ref(),
-                None,
-                &cancellation,
-            )
-            .await
+    let worker = move |run, cancellation, repository: Arc<dyn RunRepository>| {
+        let ephemeral_input = ephemeral_input;
+        async move {
+            composition
+                .execute_with_ephemeral_input(
+                    &config,
+                    &root,
+                    &meta,
+                    run,
+                    repository.as_ref(),
+                    items.as_ref(),
+                    drafts.as_ref(),
+                    worker_graphs.as_ref(),
+                    resources.as_ref(),
+                    None,
+                    ephemeral_input,
+                    &cancellation,
+                )
+                .await
+        }
     };
-    let submitted = if derived {
-        session.submit_claimed(run, staged.graph, worker).await
-    } else {
-        session
-            .submit_resumed(run, request.expected_revision, staged.graph, worker)
-            .await
-    };
+    let submitted = session.submit_claimed(run, staged.graph, worker).await;
     submitted.map_err(|error| match error {
         SubmitError::Closing => CommandFailure::project_closing("composition.adjustment"),
         SubmitError::Repository => {
@@ -1191,6 +1202,9 @@ fn map_adjustment_prepare_failure(failure: ats_runtime::RunFailure) -> CommandFa
         }
         "composition.adjustment.requires_replan" => {
             CommandFailure::composition_adjustment_requires_replan("composition.adjustment")
+        }
+        "composition.feedback.input_unavailable" => {
+            CommandFailure::composition_feedback_input_unavailable("composition.adjustment")
         }
         "composition.adjustment.invalid" | "composition.execution.invalid" => {
             CommandFailure::composition_adjustment_invalid("composition.adjustment")

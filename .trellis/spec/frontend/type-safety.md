@@ -92,15 +92,15 @@ The only interpreted payload fields are `reasonCode`, `expectedCount`, `actualCo
 are 1-128 character qualified identifiers; counts are integers in `0..=u32::MAX`. Expected/actual
 are displayed only as a valid pair. Every other field is ignored, never stringified into the UI.
 
-Composition generation submits request schema v6 with an exact `StoredItemDefinition`, optional
+Composition generation submits request schema v7 with an exact `StoredItemDefinition`, optional
 Draft ref, optional nested Package request, immutable internal `repairPolicy` and optional backend-authored tagged
 `execution` / `adjustment`. Ordinary React always submits `{kind:"until_passed"}`
 and does not expose feedback or semantic-budget controls. Each planned Behavior owns a baseline
 request; the 20-round policy limits only additional shared semantic feedback. The only
 execution forms are `start {executionGraphId}` and
 `resume {executionGraphId, expectedRevision, previousRunId}`; the request builder for an initial
-user submission omits both execution and adjustment. `adjust_composition_item` accepts only the
-selected Graph revision plus one `itemId + expectedDefinitionHash + instruction`; Tauri authors the
+user submission omits both execution and adjustment. `submit_composition_item_feedback` accepts only the
+selected succeeded Graph revision plus one `itemId + expectedDefinitionHash + expectedBehaviorSha256 + instruction`; Tauri authors the
 instruction hash and timestamp. A succeeded source derives a new Graph/Run/Artifact version, while
 the source evidence remains immutable. Result and Artifact extension v4 include the graph ID,
 per-Item Behavior request/hash, RenderedItemBundle hash and Adapter identity. React does not decode

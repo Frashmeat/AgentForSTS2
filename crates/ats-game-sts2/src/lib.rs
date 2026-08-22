@@ -112,7 +112,7 @@ impl GamePipelineProvider for Sts2PipelineProvider {
                 produces: value(
                     &behavior_slot,
                     "feature.composition-generate-behavior-checkpoint",
-                    1,
+                    2,
                 ),
                 depends_on: vec![plan_id.clone()],
                 checkpoint_policy: PipelineCheckpointPolicy::OnSuccess,
@@ -133,7 +133,7 @@ impl GamePipelineProvider for Sts2PipelineProvider {
                     value(
                         &behavior_slot,
                         "feature.composition-generate-behavior-checkpoint",
-                        1,
+                        2,
                     ),
                 ],
                 produces: value(

@@ -10,7 +10,8 @@ use ats_adapters::{
 use ats_features::FeatureSpec;
 use ats_features::composition_generate::{
     CompositionGenerateContext, CompositionGenerateDependencies, CompositionGenerateFeature,
-    CompositionGenerateRequest, CompositionGenerateService, StagedCompositionGenerateStart,
+    CompositionGenerateRequest, CompositionGenerateService, EphemeralCompositionInput,
+    StagedCompositionGenerateStart,
 };
 use ats_features::composition_plan::{
     CompositionPlanContext, CompositionPlanFeature, CompositionPlanRequest, CompositionPlanService,
@@ -368,7 +369,7 @@ impl Stage2Composition {
         graph: ats_runtime::ExecutionGraphRecord,
         expected_revision: u64,
         run_id: ats_runtime::RunId,
-        adjustment: ats_features::composition_generate::ItemAdjustment,
+        adjustment: ats_features::composition_generate::HumanSemanticFeedbackRef,
         project_root: &Path,
     ) -> Result<StagedCompositionGenerateStart, RunFailure> {
         let truth = self.current_truth()?;
@@ -450,6 +451,41 @@ impl Stage2Composition {
             resources,
             source_path,
             cancellation,
+            EphemeralCompositionInput::None,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execute_with_ephemeral_input(
+        &self,
+        config: &AppConfig,
+        project_root: &Path,
+        project: &ProjectMeta,
+        run: RunRecord,
+        repository: &dyn RunRepository,
+        items: &FileItemRepository,
+        drafts: &FileCompositionDraftRepository,
+        graphs: &FileExecutionGraphRepository,
+        resources: &FileResourceRepository,
+        source_path: Option<PathBuf>,
+        ephemeral_input: EphemeralCompositionInput,
+        cancellation: &CancellationToken,
+    ) -> Result<RunRecord, RunFailure> {
+        self.execute_inner(
+            config,
+            project_root,
+            project,
+            run,
+            repository,
+            items,
+            drafts,
+            graphs,
+            resources,
+            source_path,
+            cancellation,
+            ephemeral_input,
             None,
         )
         .await
@@ -484,6 +520,7 @@ impl Stage2Composition {
             resources,
             source_path,
             cancellation,
+            EphemeralCompositionInput::None,
             Some(model),
         )
         .await
@@ -503,6 +540,7 @@ impl Stage2Composition {
         resources: &FileResourceRepository,
         source_path: Option<PathBuf>,
         cancellation: &CancellationToken,
+        ephemeral_input: EphemeralCompositionInput,
         model_override: Option<&dyn ModelClient>,
     ) -> Result<RunRecord, RunFailure> {
         self.registry
@@ -577,7 +615,7 @@ impl Stage2Composition {
                 let build_runner = RegisteredBuildRunner;
                 let package_writer = ZipPackageWriter;
                 CompositionGenerateService::new(&plan, &build, &package, &self.pipelines)
-                    .execute_staged(
+                    .execute_staged_with_input(
                         CompositionGenerateDependencies {
                             model: model.client(),
                             items,
@@ -608,6 +646,7 @@ impl Stage2Composition {
                             model: model_name,
                             model_request_limits: ModelRequestLimits::default(),
                         },
+                        ephemeral_input,
                         cancellation,
                     )
                     .await

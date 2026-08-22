@@ -7,7 +7,7 @@
 >
 > 架构入口：[`项目架构总览`](./项目架构总览.md)。
 >
-> 最后更新：2026-08-21
+> 最后更新：2026-08-22
 
 ## 1. 请求装配
 
@@ -20,7 +20,8 @@ typed Feature request
   + sanitized Project Context
   + llm.custom_prompt
   + strict typed output contract
-  -> ModelRequestSnapshot v1
+  -> ModelRequestSnapshot v2 (内存原文)
+  -> ModelRequestCommitment v2 (持久化安全身份)
   -> shared FIFO ModelRequestQueue
   -> Provider HTTP Adapter
   -> protocol decode
@@ -29,6 +30,12 @@ typed Feature request
 
 所有 slot 精确匹配、顺序确定并参与 snapshot hash。缺失、重复、未知 slot、schema、Pack/Truth/
 Catalog/Adapter identity 或 hash 不匹配必须在 HTTP 请求前失败。
+
+`ModelRequestSnapshot` 不实现 `Serialize/Deserialize`，完整 messages 和 output contract 只在 Provider 请求内存中存在。
+持久化 Run、Graph、Behavior checkpoint 和 Artifact provenance 只保存 `ModelRequestCommitment`：它包含
+Recipe/Pack/Truth/resource/context binding、消息摘要、输出合同摘要和请求参数，并对不含自身的
+canonical identity 计算 `requestSha256`。人工真实验收反馈通过独立 `human.semantic_feedback` slot
+和瞬时 worker 输入进入模型，不复用 `llm.custom_prompt`，也不把原文写入证据。
 
 ## 2. 唯一所有者
 

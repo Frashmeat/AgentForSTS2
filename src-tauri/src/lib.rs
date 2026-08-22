@@ -153,7 +153,7 @@ pub fn run() {
             commands::stage2::pause_execution_graph,
             commands::stage2::cancel_execution_graph,
             commands::stage2::resume_execution_graph,
-            commands::stage2::adjust_composition_item,
+            commands::stage2::submit_composition_item_feedback,
             commands::stage2::get_run,
             commands::stage2::list_runs,
             commands::stage2::cancel_run,

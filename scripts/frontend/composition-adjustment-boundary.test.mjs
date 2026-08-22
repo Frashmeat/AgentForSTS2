@@ -9,12 +9,12 @@ const [commands, shell, studio] = await Promise.all([
 ]);
 
 test("composition adjustment stays behind its dedicated backend-authored command", () => {
-  assert.match(commands, /pub async fn adjust_composition_item\s*\(/);
+  assert.match(commands, /pub async fn submit_composition_item_feedback\s*\(/);
   assert.match(
     commands,
     /if request\.execution\.is_some\(\) \|\| request\.adjustment\.is_some\(\)/,
   );
-  assert.match(shell, /commands::stage2::adjust_composition_item/);
+  assert.match(shell, /commands::stage2::submit_composition_item_feedback/);
 });
 
 test("ordinary composition generation uses the internal until-passed policy", () => {

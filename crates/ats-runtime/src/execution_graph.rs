@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::{RunId, VersionedPayload};
 
-pub const EXECUTION_GRAPH_SCHEMA_VERSION: u32 = 5;
+pub const EXECUTION_GRAPH_SCHEMA_VERSION: u32 = 6;
 pub const MAX_SEMANTIC_REQUESTS: u32 = 20;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Eq, PartialEq)]
@@ -201,13 +201,31 @@ pub struct ExecutionAdjustment {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum RepairCause {
+    AutomaticTypedFeedback {
+        validation_fingerprint: Sha256Digest,
+    },
+    HumanSemanticFeedback {
+        item_id: ItemId,
+        expected_definition_hash: Sha256Digest,
+        instruction_sha256: Sha256Digest,
+        created_at: DateTime<Utc>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExecutionRepairCampaign {
     pub validation_fingerprint: Sha256Digest,
     pub targets: Vec<ExecutionRepairTarget>,
     pub current_target: u32,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub adjustment: Option<ExecutionAdjustment>,
+    pub cause: RepairCause,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -402,6 +420,9 @@ impl ExecutionGraphRecord {
         {
             return Err(ExecutionGraphError::Conflict);
         }
+        if self.requires_ephemeral_input() {
+            return Err(ExecutionGraphError::InvalidTransition);
+        }
         self.mutate(at, |next| {
             if next.status == ExecutionGraphStatus::Paused {
                 next.status = if next.repair_campaign.is_some() {
@@ -455,7 +476,7 @@ impl ExecutionGraphRecord {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
             next.repair_campaign = Some(ExecutionRepairCampaign {
-                validation_fingerprint,
+                validation_fingerprint: validation_fingerprint.clone(),
                 targets: vec![ExecutionRepairTarget {
                     item_id: target.item_id,
                     node_id: target.node_id,
@@ -465,7 +486,12 @@ impl ExecutionGraphRecord {
                     feedback: HashedExecutionPayload::new(target.feedback)?,
                 }],
                 current_target: 0,
-                adjustment: Some(adjustment),
+                cause: RepairCause::HumanSemanticFeedback {
+                    item_id: adjustment.item_id,
+                    expected_definition_hash: adjustment.expected_definition_hash,
+                    instruction_sha256: adjustment.instruction_sha256,
+                    created_at: adjustment.created_at,
+                },
             });
             next.status = ExecutionGraphStatus::Repairing;
             next.active_run_id = Some(run_id);
@@ -527,7 +553,12 @@ impl ExecutionGraphRecord {
                 feedback: HashedExecutionPayload::new(target.feedback)?,
             }],
             current_target: 0,
-            adjustment: Some(adjustment),
+            cause: RepairCause::HumanSemanticFeedback {
+                item_id: adjustment.item_id,
+                expected_definition_hash: adjustment.expected_definition_hash,
+                instruction_sha256: adjustment.instruction_sha256,
+                created_at: adjustment.created_at,
+            },
         });
         next.graph_failure = None;
         next.commit_intent = None;
@@ -898,10 +929,20 @@ impl ExecutionGraphRecord {
                 }
             }
             next.repair_campaign = Some(ExecutionRepairCampaign {
-                validation_fingerprint,
+                validation_fingerprint: validation_fingerprint.clone(),
                 targets: campaign_targets,
                 current_target: 0,
-                adjustment,
+                cause: adjustment.map_or(
+                    RepairCause::AutomaticTypedFeedback {
+                        validation_fingerprint: validation_fingerprint.clone(),
+                    },
+                    |value| RepairCause::HumanSemanticFeedback {
+                        item_id: value.item_id,
+                        expected_definition_hash: value.expected_definition_hash,
+                        instruction_sha256: value.instruction_sha256,
+                        created_at: value.created_at,
+                    },
+                ),
             });
             next.status = ExecutionGraphStatus::Repairing;
             next.graph_failure = None;
@@ -933,8 +974,9 @@ impl ExecutionGraphRecord {
             if target.status != ExecutionRepairTargetStatus::Pending {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
-            let is_adjustment = campaign.adjustment.is_some();
-            if !is_adjustment && next.semantic_feedback_count >= MAX_SEMANTIC_REQUESTS {
+            let is_human_feedback =
+                matches!(&campaign.cause, RepairCause::HumanSemanticFeedback { .. });
+            if !is_human_feedback && next.semantic_feedback_count >= MAX_SEMANTIC_REQUESTS {
                 return Err(ExecutionGraphError::InvalidTransition);
             }
             target.status = ExecutionRepairTargetStatus::Active;
@@ -942,7 +984,7 @@ impl ExecutionGraphRecord {
                 .semantic_request_count
                 .checked_add(1)
                 .ok_or(ExecutionGraphError::InvalidAttempt)?;
-            if !is_adjustment {
+            if !is_human_feedback {
                 next.semantic_feedback_count = next
                     .semantic_feedback_count
                     .checked_add(1)
@@ -1566,6 +1608,19 @@ impl ExecutionGraphRecord {
     }
 
     #[must_use]
+    pub fn requires_ephemeral_input(&self) -> bool {
+        self.repair_campaign.as_ref().is_some_and(|campaign| {
+            matches!(&campaign.cause, RepairCause::HumanSemanticFeedback { .. })
+                && campaign.targets.iter().any(|target| {
+                    matches!(
+                        target.status,
+                        ExecutionRepairTargetStatus::Pending | ExecutionRepairTargetStatus::Active
+                    )
+                })
+        })
+    }
+
+    #[must_use]
     pub fn graph_failure(&self) -> Option<&ExecutionFailure> {
         self.graph_failure.as_ref()
     }
@@ -1801,11 +1856,19 @@ fn validate_repair_campaign(
     {
         return Err(ExecutionGraphError::InvalidState);
     }
-    if let Some(adjustment) = &campaign.adjustment {
-        adjustment.feedback.validate()?;
-        if campaign.targets.len() != 1 || campaign.targets[0].item_id != adjustment.item_id {
+    match &campaign.cause {
+        RepairCause::AutomaticTypedFeedback {
+            validation_fingerprint,
+        } if validation_fingerprint != &campaign.validation_fingerprint => {
             return Err(ExecutionGraphError::InvalidMetadata);
         }
+        RepairCause::AutomaticTypedFeedback { .. } => {}
+        RepairCause::HumanSemanticFeedback { item_id, .. }
+            if campaign.targets.len() != 1 || campaign.targets[0].item_id != *item_id =>
+        {
+            return Err(ExecutionGraphError::InvalidMetadata);
+        }
+        RepairCause::HumanSemanticFeedback { .. } => {}
     }
     Ok(())
 }
@@ -2279,7 +2342,10 @@ mod tests {
             campaign.targets[0].status,
             ExecutionRepairTargetStatus::Pending
         );
-        assert!(campaign.adjustment.is_some());
+        assert!(matches!(
+            &campaign.cause,
+            RepairCause::HumanSemanticFeedback { .. }
+        ));
     }
 
     #[test]

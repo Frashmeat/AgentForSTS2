@@ -213,11 +213,12 @@ export interface AdjustCompositionItemRequest {
   expectedRevision: number;
   itemId: string;
   expectedDefinitionHash: string;
+  expectedBehaviorSha256: string;
   instruction: string;
 }
 
-export function adjustCompositionItem(request: AdjustCompositionItemRequest): Promise<string> {
-  return invokeCommand<string>("adjust_composition_item", { request });
+export function submitCompositionItemFeedback(request: AdjustCompositionItemRequest): Promise<string> {
+  return invokeCommand<string>("submit_composition_item_feedback", { request });
 }
 
 export interface PlanItem extends Record<string, unknown> {

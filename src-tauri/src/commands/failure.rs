@@ -217,6 +217,17 @@ impl CommandFailure {
         )
     }
 
+    pub fn composition_feedback_input_unavailable(stage: &str) -> Self {
+        fixed(
+            "composition.feedback.input_unavailable",
+            "input",
+            stage,
+            "Re-submit feedback from the succeeded source result; the original feedback text is not persisted.",
+            RecoveryAction::Retry,
+            false,
+        )
+    }
+
     pub fn composition_execution_invalid(stage: &str) -> Self {
         fixed(
             "composition.execution.invalid",

@@ -78,7 +78,7 @@ export function getExecutionGraph(_executionGraphId: string): Promise<ExecutionG
 export function pauseExecutionGraph(_executionGraphId: string): Promise<boolean> { return reject("pauseExecutionGraph"); }
 export function cancelExecutionGraph(_executionGraphId: string): Promise<boolean> { return reject("cancelExecutionGraph"); }
 export function resumeExecutionGraph(_executionGraphId: string, _expectedRevision: number): Promise<string> { return reject("resumeExecutionGraph"); }
-export function adjustCompositionItem(_request: AdjustCompositionItemRequest): Promise<string> { return reject("adjustCompositionItem"); }
+export function submitCompositionItemFeedback(_request: AdjustCompositionItemRequest): Promise<string> { return reject("submitCompositionItemFeedback"); }
 export function submitModPlan(_request: ModPlanRequest): Promise<string> { return reject("submitModPlan"); }
 export function submitCompositionPlan(_request: CompositionPlanRequest): Promise<string> { return reject("submitCompositionPlan"); }
 export function submitCompositionRetryNode(_request: CompositionRetryNodeRequest): Promise<string> { return reject("submitCompositionRetryNode"); }

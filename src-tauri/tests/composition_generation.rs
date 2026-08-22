@@ -14,7 +14,8 @@ use ats_features::FeatureSpec;
 use ats_features::composition::CompositionDraftRef;
 use ats_features::composition_generate::{
     CompositionGenerateContext, CompositionGenerateDependencies, CompositionGenerateFeature,
-    CompositionGenerateRequest, CompositionGenerateService, ItemAdjustment,
+    CompositionGenerateRequest, CompositionGenerateService, EphemeralCompositionInput,
+    HumanSemanticFeedbackRef,
 };
 use ats_features::mod_plan::{ModPlanFeature, ModPlanService};
 use ats_features::project_build::{ProjectBuildFeature, ProjectBuildService};
@@ -40,8 +41,8 @@ use ats_kernel::{
 };
 use ats_runtime::{
     ArtifactManifest, BuildError, BuildRunner, BuildStepReport, BuildStepRequest,
-    CancellationToken, ExecutionGraphRepository, FinishReason, ModelClient, ModelError,
-    ModelRequestSnapshot, ModelResponse, ModelStream, ModelStreamEvent, PackageError,
+    CancellationToken, ExecutionGraphRecord, ExecutionGraphRepository, FinishReason, ModelClient,
+    ModelError, ModelRequestSnapshot, ModelResponse, ModelStream, ModelStreamEvent, PackageError,
     PackagePrepareRequest, PackageReport, PackageWriter, PendingPackageOutput, RunRecord,
     RunRepository, RunStatus, RunTransition, TokenUsage, ValidationError, ValidationIssue,
     ValidationIssueRepairability, ValidationIssueSeverity, ValidationReport, ValidationRequest,
@@ -96,6 +97,20 @@ fn behavior_registry() -> &'static BehaviorAdapterRegistry {
         registry.register(FixtureBehaviorAdapter::new()).unwrap();
         registry
     })
+}
+
+fn behavior_hash(graph: &ExecutionGraphRecord, item_id: &str) -> Sha256Digest {
+    graph
+        .nodes()
+        .values()
+        .filter(|node| node.role_id == "composition.behavior")
+        .find_map(|node| {
+            let payload = node.active_checkpoint.as_ref()?.payload.payload();
+            (payload["proposal"]["itemId"].as_str() == Some(item_id))
+                .then(|| Sha256Digest::parse(payload["behaviorSha256"].as_str()?).ok())
+                .flatten()
+        })
+        .expect("behavior checkpoint for fixture item")
 }
 
 struct FixtureBehaviorAdapter {
@@ -737,9 +752,12 @@ async fn succeeded_composition_adjusts_one_item_in_a_new_graph_and_revalidates_t
         .items
         .load_current(&ItemId::parse("fixture-child").unwrap())
         .unwrap();
-    let adjustment = ItemAdjustment::new(
+    let adjustment = HumanSemanticFeedbackRef::new_for_source(
+        source_graph_id.clone(),
+        source_revision,
         child.definition.item_id.clone(),
         child.definition_hash.clone(),
+        behavior_hash(&source_graph, child.definition.item_id.as_str()),
         "Make this item clearer without changing its identity.",
         Utc::now(),
     )
@@ -749,7 +767,7 @@ async fn succeeded_composition_adjusts_one_item_in_a_new_graph_and_revalidates_t
             source_graph.clone(),
             source_revision,
             adjustment_run_id.clone(),
-            adjustment,
+            adjustment.clone(),
             context(),
         )
         .unwrap();
@@ -777,7 +795,7 @@ async fn succeeded_composition_adjusts_one_item_in_a_new_graph_and_revalidates_t
         calls: AtomicUsize::new(1),
     };
     let execution = service
-        .execute_staged(
+        .execute_staged_with_input(
             CompositionGenerateDependencies {
                 model: &model,
                 behavior_adapters: behavior_registry(),
@@ -797,6 +815,10 @@ async fn succeeded_composition_adjusts_one_item_in_a_new_graph_and_revalidates_t
             &mut run,
             start.request,
             context(),
+            EphemeralCompositionInput::HumanSemanticFeedback {
+                feedback_ref: adjustment,
+                instruction: "Make this item clearer without changing its identity.".into(),
+            },
             &CancellationToken::new(),
         )
         .await
@@ -839,9 +861,12 @@ async fn succeeded_composition_adjusts_one_item_in_a_new_graph_and_revalidates_t
             derived.clone(),
             derived.revision(),
             no_change_run_id.clone(),
-            ItemAdjustment::new(
+            HumanSemanticFeedbackRef::new_for_source(
+                start.graph.id().clone(),
+                start.graph.revision(),
                 child.definition.item_id,
                 child.definition_hash,
+                behavior_hash(&derived, "fixture-child"),
                 "Keep the adjusted behavior exactly as it is.",
                 Utc::now(),
             )
@@ -868,8 +893,13 @@ async fn succeeded_composition_adjusts_one_item_in_a_new_graph_and_revalidates_t
         responses: Mutex::new(VecDeque::from([repaired_bundle_response("child")])),
         requests: AtomicUsize::new(0),
     };
+    let no_change_feedback_ref = no_change_start
+        .request
+        .adjustment
+        .clone()
+        .expect("adjustment ref");
     let no_change = service
-        .execute_staged(
+        .execute_staged_with_input(
             CompositionGenerateDependencies {
                 model: &no_change_model,
                 behavior_adapters: behavior_registry(),
@@ -889,6 +919,10 @@ async fn succeeded_composition_adjusts_one_item_in_a_new_graph_and_revalidates_t
             &mut no_change_run,
             no_change_start.request,
             context(),
+            EphemeralCompositionInput::HumanSemanticFeedback {
+                feedback_ref: no_change_feedback_ref,
+                instruction: "Keep the adjusted behavior exactly as it is.".into(),
+            },
             &CancellationToken::new(),
         )
         .await;
@@ -958,9 +992,12 @@ async fn composition_adjustment_rejects_a_stale_definition_before_model_work() {
             graph.clone(),
             graph.revision(),
             ats_runtime::RunId::new(),
-            ItemAdjustment::new(
+            HumanSemanticFeedbackRef::new_for_source(
+                graph.id().clone(),
+                graph.revision(),
                 ItemId::parse("fixture-child").unwrap(),
                 Sha256Digest::parse("f".repeat(64)).unwrap(),
+                Sha256Digest::parse("0".repeat(64)).unwrap(),
                 "Change this item.",
                 Utc::now(),
             )
