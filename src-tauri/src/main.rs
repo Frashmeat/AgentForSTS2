@@ -3,10 +3,14 @@
 
 fn main() {
     let mut args = std::env::args_os().skip(1);
-    if args.next().as_deref() == Some(std::ffi::OsStr::new("--write-build-info")) {
+    let command = args.next();
+    if command.as_deref() == Some(std::ffi::OsStr::new("--write-build-info")) {
         let Some(output_path) = args.next() else {
             std::process::exit(2);
         };
+        if args.next().is_some() {
+            std::process::exit(2);
+        }
         let build = agentthespire_desktop_lib::build_info();
         let Ok(json) = serde_json::to_vec(&build) else {
             std::process::exit(2);
@@ -15,6 +19,15 @@ fn main() {
             std::process::exit(2);
         }
         return;
+    }
+    if command.as_deref() == Some(std::ffi::OsStr::new("--headless-jsonl")) {
+        if args.next().is_some() {
+            std::process::exit(2);
+        }
+        std::process::exit(agentthespire_desktop_lib::run_headless_jsonl());
+    }
+    if command.is_some() {
+        std::process::exit(2);
     }
     agentthespire_desktop_lib::run();
 }

@@ -4,6 +4,106 @@
 >
 > Use this file for cross-layer ownership, persisted schemas and recovery invariants. Failure serialization and redaction belong to [`error-handling.md`](./error-handling.md); implementation quality and required gates belong to [`quality-guidelines.md`](./quality-guidelines.md). Task status and candidate evidence do not belong in stable specs.
 
+## Scenario: Desktop Headless Acceptance Shell
+
+### 1. Scope / Trigger
+
+Use this contract when a production desktop binary must execute installed-candidate acceptance
+without starting a WebView or enabling the test-only WebDriver feature. It is a local Shell transport,
+not a Web Project API or a second execution runtime.
+
+### 2. Signatures
+
+```text
+agentthespire-desktop.exe --headless-jsonl
+agentthespire_desktop_lib::run_headless_jsonl() -> i32
+
+HeadlessRequest v1:
+  schemaVersion, requestId, command { name, input? }
+
+HeadlessResponse v1:
+  schemaVersion, requestId?, build, ok, result? | failure?
+```
+
+Implementation lives in `src-tauri/src/headless.rs`; `src-tauri/src/main.rs` owns process argument
+routing; `scripts/e2e/headless-client.mjs` is the installed-binary driver. Desktop configuration uses
+the existing `SPIREFORGE_APP_DATA_ROOT` and `SPIREFORGE_CONFIG_PATH` resolution contract.
+
+### 3. Contracts
+
+```text
+JSONL driver -> shared desktop command services -> ProjectSession / Stage2Composition
+Tauri IPC   -> shared desktop command services -> ProjectSession / Stage2Composition
+```
+
+- stdin/stdout is a local parent-child transport; it opens no network listener and provides no Web API.
+- A request line is at most 4 MiB. `requestId` is 1..=128 ASCII alphanumeric/`-_.` characters.
+- Command envelopes and every input use `deny_unknown_fields`. Commands cover health/settings,
+  Project, Truth, generic Feature, Run/Graph, Item/Draft/Resource and human feedback operations.
+- Every response repeats exact `BuildInfo { commit, variant, features, buildId }` and contains exactly
+  one typed result or `ActionableFailure`.
+- One process owns one `ActiveProject`, OS lock, repositories and worker task set. Feature submission
+  returns `RunId`; the driver polls persisted Run/Graph instead of inventing a client terminal state.
+- EOF, close and shutdown call ProjectSession cancel/drain before releasing the lock.
+- Feedback text remains transient request/worker input and is never echoed or persisted.
+- The Shell never decodes checkpoints, implements Feature logic, adds retries or branches on game ID.
+- Empty process arguments start UI; `--write-build-info` and `--headless-jsonl` are the only non-UI
+  commands; every unknown argument exits 2.
+- Installed acceptance uses the installed binary and a fresh candidate-specific app-data/project root.
+  Source debug runs cannot be relabeled as candidate evidence.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result | Project/model work |
+| --- | --- | --- |
+| malformed UTF-8/JSON, wrong version, unsafe request ID | `run.input_invalid` at `headless.request.*` | none |
+| line exceeds 4 MiB | discard through newline; typed size failure; next request remains readable | none |
+| unknown command/input field | typed input failure | none |
+| valid generic Feature submit | one `RunId`; persisted Run/Graph owns terminal state | registered Feature only |
+| EOF/shutdown with active work | cancel/drain, then unlock | no fake success |
+| feedback request | instruction available only to current worker memory | target-only derived Graph |
+| bootstrap/config/Pack failure | one request-id-less typed response, nonzero exit | none |
+| unknown process argument | exit 2 without UI | none |
+
+### 5. Good / Base / Bad Cases
+
+- Good: an installed ML binary reports the manifest BuildInfo, creates a fresh Project, completes a
+  Feature Run, returns terminal Graph/Artifact identities, drains and releases the lock.
+- Base: a malformed command receives only `ActionableFailure`; the next valid JSONL request still runs.
+- Bad: bundle `e2e`, expose an unauthenticated HTTP Project API, copy Feature validation into Node,
+  persist the JSONL transcript/feedback, or report a source debug run as installed evidence.
+
+### 6. Tests Required
+
+```powershell
+cargo test -p agentthespire-desktop --lib
+cargo test -p agentthespire-desktop --test headless_transport
+cargo test -p agentthespire-desktop --test composition_generation --test stage2_character_composition
+cargo clippy -p agentthespire-desktop --all-targets -- -D warnings
+node --check scripts/e2e/headless-client.mjs
+node --check scripts/e2e/run-headless-smoke.mjs
+```
+
+Assertions cover strict/bounded decode, BuildInfo stability, redacted failures, real child-process
+handshake, unknown-argument no-UI exit, succeeded `project.create` Run, shared Composition behavior,
+graceful shutdown and project-lock reacquisition. Installed E2E separately proves fresh evidence and
+zero staging/transaction residue.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```text
+Node driver -> copy Project/Feature/Graph rules -> write repository JSON directly
+```
+
+Correct:
+
+```text
+Node driver -> versioned JSONL -> shared desktop command service
+            -> ProjectSession / Stage2Composition -> authoritative repositories
+```
+
 ## 1. Kernel Values
 
 `ats-kernel` owns validated IDs (including stable Item/Item Type/field/locale IDs), schema refs/versions, SHA-256, `ActionableFailure`, `BuildInfo`, and project-template value contracts. Constructors and Serde deserialization apply equivalent validation. Kernel imports no IO runtime, provider, game, Feature, or Shell.

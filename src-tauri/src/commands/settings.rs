@@ -121,12 +121,19 @@ pub struct ToolchainPatch {
 
 #[tauri::command]
 pub fn get_settings_snapshot(config: State<'_, Arc<AppConfig>>) -> SettingsSnapshot {
-    snapshot(&config)
+    settings_snapshot(&config)
 }
 
 #[tauri::command]
 pub fn save_settings_patch(
     config: State<'_, Arc<AppConfig>>,
+    patch: SettingsPatch,
+) -> CommandResult<SettingsSnapshot> {
+    save_settings_patch_inner(&config, patch)
+}
+
+pub(crate) fn save_settings_patch_inner(
+    config: &AppConfig,
     patch: SettingsPatch,
 ) -> CommandResult<SettingsSnapshot> {
     let settings = merge_settings_patch(config.settings_snapshot(), patch)?;
@@ -137,7 +144,7 @@ pub fn save_settings_patch(
         .ok_or_else(|| CommandFailure::storage("settings.path"))?;
     SettingsStore::save(&path, &settings).map_err(|_| CommandFailure::storage("settings.save"))?;
     config.replace_settings(settings);
-    Ok(snapshot(&config))
+    Ok(settings_snapshot(config))
 }
 
 #[tauri::command]
@@ -208,7 +215,7 @@ fn replace(target: &mut String, value: Option<String>) {
     }
 }
 
-fn snapshot(config: &AppConfig) -> SettingsSnapshot {
+pub(crate) fn settings_snapshot(config: &AppConfig) -> SettingsSnapshot {
     let (settings, status) = config.snapshot();
     SettingsSnapshot {
         config_path: status.path,

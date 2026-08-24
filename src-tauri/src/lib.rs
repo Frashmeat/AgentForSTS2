@@ -1,20 +1,21 @@
 //! AgentTheSpire desktop Stage 2 composition root.
 
 mod app_shutdown;
+mod bootstrap;
 mod build_identity;
 mod commands;
 mod composition;
+mod headless;
 mod project_session;
 
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 
-use ats_adapters::{ConfigStatus, Settings, SettingsStore};
+use ats_adapters::{ConfigStatus, Settings};
 use ats_workspace::AppDataPaths;
 use tauri::Manager;
 
 use crate::app_shutdown::{AppShutdown, ExitRequestAction, drain_active_project};
-use crate::composition::Stage2Composition;
 use crate::project_session::{ActiveProject, PROJECT_DRAIN_TIMEOUT};
 
 const APP_DATA_ROOT_ENV: &str = "SPIREFORGE_APP_DATA_ROOT";
@@ -71,6 +72,11 @@ pub struct AppPaths {
 
 impl AppPaths {
     #[must_use]
+    pub fn new(data: AppDataPaths) -> Self {
+        Self { data }
+    }
+
+    #[must_use]
     pub fn recents_path(&self) -> PathBuf {
         self.data.recent_projects_path.clone()
     }
@@ -81,27 +87,16 @@ pub fn build_info() -> ats_kernel::BuildInfo {
     build_identity::current()
 }
 
+pub fn run_headless_jsonl() -> i32 {
+    headless::run()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app_data = std::env::var_os(APP_DATA_ROOT_ENV)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .map(AppDataPaths::from_root)
-        .unwrap_or_else(AppDataPaths::resolve);
-    let legacy_config = std::env::current_exe()
-        .ok()
-        .as_deref()
-        .and_then(SettingsStore::desktop_legacy_config_path);
-    let (settings, status) =
-        SettingsStore::load_desktop(&app_data.config_path, legacy_config.as_deref());
-    if let Err(error) = app_data.ensure_dirs() {
-        eprintln!("ats-desktop: app data initialization failed: {error}");
-    }
-    let composition = Arc::new(
-        Stage2Composition::built_in(app_data.root.clone())
-            .expect("built-in Stage 2 composition is valid"),
-    );
-    let config = Arc::new(AppConfig::new(settings, status));
+    let runtime = bootstrap::load().expect("built-in Stage 2 desktop runtime is valid");
+    let app_data = runtime.app_data;
+    let composition = runtime.composition;
+    let config = runtime.config;
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -116,7 +111,7 @@ pub fn run() {
 
     builder
         .manage(config)
-        .manage(AppPaths { data: app_data })
+        .manage(AppPaths::new(app_data))
         .manage(composition)
         .manage(ActiveProject::new())
         .manage(AppShutdown::new())

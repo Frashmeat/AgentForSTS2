@@ -13,6 +13,10 @@
 
 Adapters, `ats-web`, and `ats-cli` should use structured lifecycle logging when a subscriber exists. The desktop composition/startup path may use bounded `eprintln!` where no subscriber is guaranteed. Shell event delivery failure must not mutate persisted Run state.
 
+In `--headless-jsonl` mode stdout is protocol-exclusive: exactly one versioned JSON response per
+accepted input line. Local diagnostics use bounded stderr only. Native tools must remain captured by
+their adapters and cannot inherit stdout in a way that corrupts the protocol.
+
 Prefer stable fields:
 
 ```text

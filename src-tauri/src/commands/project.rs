@@ -43,9 +43,20 @@ pub async fn create_project(
     parent_dir: String,
     name: String,
 ) -> CommandResult<CurrentProject> {
-    let local_paths = configured_local_build_paths(&config)?;
+    create_project_inner(&active, &paths, &config, &composition, parent_dir, name).await
+}
+
+pub(crate) async fn create_project_inner(
+    active: &ActiveProject,
+    paths: &AppPaths,
+    config: &AppConfig,
+    composition: &Stage2Composition,
+    parent_dir: String,
+    name: String,
+) -> CommandResult<CurrentProject> {
+    let local_paths = configured_local_build_paths(config)?;
     let _lifecycle = active.lifecycle.lock().await;
-    drain_previous(&active, CancellationReason::ProjectSwitch).await?;
+    drain_previous(active, CancellationReason::ProjectSwitch).await?;
     let request = ProjectCreateRequest { name };
     let contributions = composition
         .resolve(
@@ -83,7 +94,7 @@ pub async fn create_project(
         .repository()
         .create(&run)
         .map_err(|_| CommandFailure::storage("project.create_run"))?;
-    record_recent(&paths, &session)?;
+    record_recent(paths, &session)?;
     active
         .replace(Some(Arc::clone(&session)))
         .map_err(|_| CommandFailure::unclassified("project.create_activate"))?;
@@ -98,9 +109,19 @@ pub async fn open_project(
     composition: State<'_, Arc<Stage2Composition>>,
     path: String,
 ) -> CommandResult<CurrentProject> {
-    let local_paths = configured_local_build_paths_snapshot(&config);
+    open_project_inner(&active, &paths, &config, &composition, path).await
+}
+
+pub(crate) async fn open_project_inner(
+    active: &ActiveProject,
+    paths: &AppPaths,
+    config: &AppConfig,
+    composition: &Stage2Composition,
+    path: String,
+) -> CommandResult<CurrentProject> {
+    let local_paths = configured_local_build_paths_snapshot(config);
     let _lifecycle = active.lifecycle.lock().await;
-    drain_previous(&active, CancellationReason::ProjectSwitch).await?;
+    drain_previous(active, CancellationReason::ProjectSwitch).await?;
     let folder = ProjectFolder::open(Path::new(&path))
         .map_err(|error| project_failure("project.open", error))?;
     if folder.meta().game_id != composition.pack().id().as_str() {
@@ -109,7 +130,7 @@ pub async fn open_project(
     sync_local_config(folder.path(), &local_paths)?;
     let session = ProjectSession::open(folder)
         .map_err(|_| CommandFailure::storage("project.open_session"))?;
-    record_recent(&paths, &session)?;
+    record_recent(paths, &session)?;
     active
         .replace(Some(Arc::clone(&session)))
         .map_err(|_| CommandFailure::unclassified("project.open_activate"))?;
@@ -118,12 +139,22 @@ pub async fn open_project(
 
 #[tauri::command]
 pub async fn close_project(active: State<'_, ActiveProject>) -> CommandResult<()> {
+    close_project_inner(&active).await
+}
+
+pub(crate) async fn close_project_inner(active: &ActiveProject) -> CommandResult<()> {
     let _lifecycle = active.lifecycle.lock().await;
-    drain_previous(&active, CancellationReason::ProjectClose).await
+    drain_previous(active, CancellationReason::ProjectClose).await
 }
 
 #[tauri::command]
 pub fn current_project(active: State<'_, ActiveProject>) -> CommandResult<Option<CurrentProject>> {
+    current_project_inner(&active)
+}
+
+pub(crate) fn current_project_inner(
+    active: &ActiveProject,
+) -> CommandResult<Option<CurrentProject>> {
     active
         .current()
         .map(|value| value.as_deref().map(snapshot))

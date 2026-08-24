@@ -4,6 +4,27 @@
 >
 > This file defines implementation discipline, scenario-level checks and required gates. Authoritative persisted contracts live in [`stage2-contracts.md`](./stage2-contracts.md), while failure/redaction rules live in [`error-handling.md`](./error-handling.md). Candidate results and task completion state are evidence, not stable quality rules.
 
+## Desktop Headless Shell Quality
+
+The production JSONL Shell and Tauri IPC call the same internal desktop command services. A headless
+driver may orchestrate commands and poll terminal state, but it cannot copy Feature validation,
+Run/Graph transitions, Prompt construction, game Pipeline logic or repository formats.
+
+Required focused evidence:
+
+```powershell
+cargo test -p agentthespire-desktop --lib
+cargo test -p agentthespire-desktop --test headless_transport
+cargo clippy -p agentthespire-desktop --all-targets -- -D warnings
+node --check scripts/e2e/headless-client.mjs
+node --check scripts/e2e/run-headless-smoke.mjs
+```
+
+Assertions cover a real child-process handshake, strict unknown-field rejection, stable BuildInfo,
+typed/redacted failures, project-create Run persistence, graceful close and lock reacquisition.
+Installed E2E additionally proves fresh Truth/Project/Run/Graph/Artifact identities and zero staging/
+transaction residue. It never substitutes for human real-game behavior acceptance.
+
 ## 1. Dependency Direction
 
 The production DAG is:

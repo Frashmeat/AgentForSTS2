@@ -29,6 +29,13 @@ pub fn get_health(
     active: State<'_, ActiveProject>,
     composition: State<'_, Arc<Stage2Composition>>,
 ) -> HealthReport {
+    health_report(&active, &composition)
+}
+
+pub(crate) fn health_report(
+    active: &ActiveProject,
+    composition: &Stage2Composition,
+) -> HealthReport {
     let project_open = active.current().is_ok_and(|value| value.is_some());
     let truth_ready = FileTruthSnapshotRepository::new(composition.runtime_root().to_path_buf())
         .open_current(composition.pack())

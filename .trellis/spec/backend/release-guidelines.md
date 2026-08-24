@@ -12,6 +12,9 @@ build.ps1 -Variant Baseline|Ml [-BuildId <id>] [-PlanOnly]
 - The candidate script owns orchestration and `release-verification.json`.
 - `build.ps1` owns commit/variant/features/build-id injection, isolated target/bundle paths, final GUI BuildInfo handshake, and variant `release-manifest.json` publication.
 - `src-tauri/build.rs` derives candidate identity inputs from actual Cargo cfg and `ats-kernel::BuildInfo` validates the embedded result. Scripts do not accept caller-supplied feature strings.
+- Every bundled baseline/ML desktop binary includes `--headless-jsonl` without the `e2e` feature.
+  Each JSONL response repeats the exact embedded BuildInfo. No arguments start the UI; unknown
+  arguments exit 2 and must never fall back to the UI.
 
 One candidate uses one build ID for all requested variants:
 
@@ -79,12 +82,14 @@ Variant verification recomputes manifest identity, path containment, allowed ins
 | Artifact traversal/missing/size/hash mismatch | Verify step failed |
 | Raw exception contains a secret/path canary | Verification keeps only the stable step summary |
 | Process interrupted | Last atomic JSON remains parseable and not succeeded |
+| Installed background acceptance | Installed binary BuildInfo matches the manifest before any fresh evidence; JSONL creates new Project/Truth/Run/Graph/Artifact and exits with the project lock reacquirable |
 
 ## Good / Base / Bad
 
 - Good: `-Variant All` produces two isolated manifests and one successful verification bound to one commit/build ID.
 - Base: `-PlanOnly` proves step/path/feature selection without creating a candidate or claiming release success.
 - Bad: a script scans shared `src-tauri/target`, trusts a preexisting hash, accepts `--features=e2e`, or emits success after a failed required step.
+- Bad: source debug GUI/headless evidence, an old candidate, or renamed historical evidence is reported as the installed candidate closure.
 
 ## Required Tests
 

@@ -115,12 +115,27 @@ pub async fn submit_feature(
     config: State<'_, Arc<AppConfig>>,
     submission: SubmitFeatureRequest,
 ) -> CommandResult<RunId> {
-    let session = current_session(&active, "run.submit")?;
+    submit_feature_inner(
+        &active,
+        Arc::clone(composition.inner()),
+        Arc::clone(config.inner()),
+        submission,
+    )
+    .await
+}
+
+pub(crate) async fn submit_feature_inner(
+    active: &ActiveProject,
+    composition: Arc<Stage2Composition>,
+    config: Arc<AppConfig>,
+    submission: SubmitFeatureRequest,
+) -> CommandResult<RunId> {
+    let session = current_session(active, "run.submit")?;
     let drafts = session.composition_draft_repository();
     let items = session.item_repository();
     let resources = session.resource_repository();
     ensure_submission_ready(
-        composition.inner(),
+        composition.as_ref(),
         items.as_ref(),
         drafts.as_ref(),
         resources.as_ref(),
@@ -190,8 +205,6 @@ pub async fn submit_feature(
     };
     let root = session.path().to_path_buf();
     let meta = session.meta().clone();
-    let composition = Arc::clone(composition.inner());
-    let config = Arc::clone(config.inner());
     let graphs = session.execution_graph_repository();
     let source_path = submission.source_path.map(PathBuf::from);
     let worker = move |run: RunRecord,
@@ -227,7 +240,13 @@ pub async fn submit_feature(
 pub fn list_execution_graphs(
     active: State<'_, ActiveProject>,
 ) -> CommandResult<Vec<ExecutionGraphView>> {
-    let session = current_session(&active, "execution.list")?;
+    list_execution_graphs_inner(&active)
+}
+
+pub(crate) fn list_execution_graphs_inner(
+    active: &ActiveProject,
+) -> CommandResult<Vec<ExecutionGraphView>> {
+    let session = current_session(active, "execution.list")?;
     let graphs = session
         .execution_graph_repository()
         .list()
@@ -249,9 +268,16 @@ pub fn get_execution_graph(
     active: State<'_, ActiveProject>,
     execution_graph_id: String,
 ) -> CommandResult<ExecutionGraphView> {
+    get_execution_graph_inner(&active, execution_graph_id)
+}
+
+pub(crate) fn get_execution_graph_inner(
+    active: &ActiveProject,
+    execution_graph_id: String,
+) -> CommandResult<ExecutionGraphView> {
     let id = ExecutionGraphId::parse(execution_graph_id)
         .map_err(|_| CommandFailure::composition_invalid("execution.get"))?;
-    let session = current_session(&active, "execution.get")?;
+    let session = current_session(active, "execution.get")?;
     let graph = session
         .execution_graph_repository()
         .get(&id)
@@ -314,9 +340,26 @@ pub async fn resume_execution_graph(
     execution_graph_id: String,
     expected_revision: u64,
 ) -> CommandResult<RunId> {
+    resume_execution_graph_inner(
+        &active,
+        Arc::clone(composition.inner()),
+        Arc::clone(config.inner()),
+        execution_graph_id,
+        expected_revision,
+    )
+    .await
+}
+
+pub(crate) async fn resume_execution_graph_inner(
+    active: &ActiveProject,
+    composition: Arc<Stage2Composition>,
+    config: Arc<AppConfig>,
+    execution_graph_id: String,
+    expected_revision: u64,
+) -> CommandResult<RunId> {
     let id = ExecutionGraphId::parse(execution_graph_id)
         .map_err(|_| CommandFailure::composition_invalid("execution.resume"))?;
-    let session = current_session(&active, "execution.resume")?;
+    let session = current_session(active, "execution.resume")?;
     let graphs = session.execution_graph_repository();
     let graph = graphs
         .get(&id)
@@ -362,8 +405,6 @@ pub async fn resume_execution_graph(
     };
     let root = session.path().to_path_buf();
     let meta = session.meta().clone();
-    let composition = Arc::clone(composition.inner());
-    let config = Arc::clone(config.inner());
     let resources = session.resource_repository();
     let items = session.item_repository();
     let drafts = session.composition_draft_repository();
@@ -428,7 +469,22 @@ pub async fn submit_composition_item_feedback(
     config: State<'_, Arc<AppConfig>>,
     request: AdjustCompositionItemRequest,
 ) -> CommandResult<RunId> {
-    let session = current_session(&active, "composition.adjustment")?;
+    submit_composition_item_feedback_inner(
+        &active,
+        Arc::clone(composition.inner()),
+        Arc::clone(config.inner()),
+        request,
+    )
+    .await
+}
+
+pub(crate) async fn submit_composition_item_feedback_inner(
+    active: &ActiveProject,
+    composition: Arc<Stage2Composition>,
+    config: Arc<AppConfig>,
+    request: AdjustCompositionItemRequest,
+) -> CommandResult<RunId> {
+    let session = current_session(active, "composition.adjustment")?;
     let graphs = session.execution_graph_repository();
     let source = graphs
         .get(&request.execution_graph_id)
@@ -473,8 +529,6 @@ pub async fn submit_composition_item_feedback(
     let run = RunRecord::new_with_id(run_id, CompositionGenerateFeature::id(), payload);
     let root = session.path().to_path_buf();
     let meta = session.meta().clone();
-    let composition = Arc::clone(composition.inner());
-    let config = Arc::clone(config.inner());
     let resources = session.resource_repository();
     let items = session.item_repository();
     let drafts = session.composition_draft_repository();
@@ -520,7 +574,13 @@ pub fn get_item_capabilities(
 pub fn list_item_definitions(
     active: State<'_, ActiveProject>,
 ) -> CommandResult<Vec<StoredItemDefinition>> {
-    let session = current_session(&active, "item.list")?;
+    list_item_definitions_inner(&active)
+}
+
+pub(crate) fn list_item_definitions_inner(
+    active: &ActiveProject,
+) -> CommandResult<Vec<StoredItemDefinition>> {
+    let session = current_session(active, "item.list")?;
     session
         .item_repository()
         .list_current()
@@ -533,7 +593,15 @@ pub fn get_item_definition(
     item_id: String,
     definition_hash: Option<String>,
 ) -> CommandResult<StoredItemDefinition> {
-    let session = current_session(&active, "item.get")?;
+    get_item_definition_inner(&active, item_id, definition_hash)
+}
+
+pub(crate) fn get_item_definition_inner(
+    active: &ActiveProject,
+    item_id: String,
+    definition_hash: Option<String>,
+) -> CommandResult<StoredItemDefinition> {
+    let session = current_session(active, "item.get")?;
     let item_id = ItemId::parse(item_id).map_err(|_| CommandFailure::item_invalid("item.get"))?;
     let repository = session.item_repository();
     match definition_hash {
@@ -553,14 +621,22 @@ pub fn save_item_definition(
     composition: State<'_, Arc<Stage2Composition>>,
     definition: ItemDefinition,
 ) -> CommandResult<StoredItemDefinition> {
-    let session = current_session(&active, "item.save")?;
+    save_item_definition_inner(&active, &composition, definition)
+}
+
+pub(crate) fn save_item_definition_inner(
+    active: &ActiveProject,
+    composition: &Stage2Composition,
+    definition: ItemDefinition,
+) -> CommandResult<StoredItemDefinition> {
+    let session = current_session(active, "item.save")?;
     ItemDefinitionValidator::validate(
         composition.pack(),
         &definition,
         ItemDefinitionValidationMode::Draft,
     )
     .map_err(|_| CommandFailure::item_invalid("item.save"))?;
-    let capabilities = item_capabilities(composition.inner())?;
+    let capabilities = item_capabilities(composition)?;
     let ready = capabilities
         .item_types
         .iter()
@@ -578,7 +654,13 @@ pub fn save_item_definition(
 pub fn list_composition_drafts(
     active: State<'_, ActiveProject>,
 ) -> CommandResult<Vec<CompositionDraft>> {
-    current_session(&active, "composition.draft.list")?
+    list_composition_drafts_inner(&active)
+}
+
+pub(crate) fn list_composition_drafts_inner(
+    active: &ActiveProject,
+) -> CommandResult<Vec<CompositionDraft>> {
+    current_session(active, "composition.draft.list")?
         .composition_draft_repository()
         .list()
         .map_err(|error| map_draft_store_error(error, "composition.draft.list"))
@@ -589,9 +671,16 @@ pub fn get_composition_draft(
     active: State<'_, ActiveProject>,
     draft_id: String,
 ) -> CommandResult<CompositionDraft> {
+    get_composition_draft_inner(&active, draft_id)
+}
+
+pub(crate) fn get_composition_draft_inner(
+    active: &ActiveProject,
+    draft_id: String,
+) -> CommandResult<CompositionDraft> {
     let id = CompositionDraftId::parse(draft_id)
         .map_err(|_| CommandFailure::composition_invalid("composition.draft.get"))?;
-    current_session(&active, "composition.draft.get")?
+    current_session(active, "composition.draft.get")?
         .composition_draft_repository()
         .load(&id)
         .map_err(|error| map_draft_store_error(error, "composition.draft.get"))
@@ -605,9 +694,19 @@ pub fn update_composition_draft(
     expected_revision: u64,
     nodes: BTreeMap<ItemId, CompositionDraftNode>,
 ) -> CommandResult<CompositionDraft> {
+    update_composition_draft_inner(&active, &composition, draft_id, expected_revision, nodes)
+}
+
+pub(crate) fn update_composition_draft_inner(
+    active: &ActiveProject,
+    composition: &Stage2Composition,
+    draft_id: String,
+    expected_revision: u64,
+    nodes: BTreeMap<ItemId, CompositionDraftNode>,
+) -> CommandResult<CompositionDraft> {
     let id = CompositionDraftId::parse(draft_id)
         .map_err(|_| CommandFailure::composition_invalid("composition.draft.update"))?;
-    let session = current_session(&active, "composition.draft.update")?;
+    let session = current_session(active, "composition.draft.update")?;
     let repository = session.composition_draft_repository();
     let current = repository
         .load(&id)
@@ -659,6 +758,22 @@ pub fn confirm_composition_draft(
     expected_revision: u64,
     selected_item_ids: Vec<String>,
 ) -> CommandResult<CompositionConfirmation> {
+    confirm_composition_draft_inner(
+        &active,
+        &composition,
+        draft_id,
+        expected_revision,
+        selected_item_ids,
+    )
+}
+
+pub(crate) fn confirm_composition_draft_inner(
+    active: &ActiveProject,
+    composition: &Stage2Composition,
+    draft_id: String,
+    expected_revision: u64,
+    selected_item_ids: Vec<String>,
+) -> CommandResult<CompositionConfirmation> {
     let id = CompositionDraftId::parse(draft_id)
         .map_err(|_| CommandFailure::composition_invalid("composition.draft.confirm"))?;
     let selected = selected_item_ids
@@ -666,7 +781,7 @@ pub fn confirm_composition_draft(
         .map(ItemId::parse)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| CommandFailure::composition_invalid("composition.draft.confirm"))?;
-    let session = current_session(&active, "composition.draft.confirm")?;
+    let session = current_session(active, "composition.draft.confirm")?;
     let draft = session
         .composition_draft_repository()
         .load(&id)
@@ -703,8 +818,15 @@ pub fn list_resource_assets(
     active: State<'_, ActiveProject>,
     composition: State<'_, Arc<Stage2Composition>>,
 ) -> CommandResult<Vec<ResourceAsset>> {
-    let session = current_session(&active, "resource.list")?;
-    let contributions = resource_contributions(composition.inner(), "resource.list")?;
+    list_resource_assets_inner(&active, &composition)
+}
+
+pub(crate) fn list_resource_assets_inner(
+    active: &ActiveProject,
+    composition: &Stage2Composition,
+) -> CommandResult<Vec<ResourceAsset>> {
+    let session = current_session(active, "resource.list")?;
+    let contributions = resource_contributions(composition, "resource.list")?;
     ResourcePrepareService
         .list(
             session.resource_repository().as_ref(),
@@ -749,12 +871,21 @@ pub fn select_resource(
     resource_id: String,
     version: String,
 ) -> CommandResult<ResourcePrepareResult> {
-    let session = current_session(&active, "resource.select")?;
+    select_resource_inner(&active, &composition, resource_id, version)
+}
+
+pub(crate) fn select_resource_inner(
+    active: &ActiveProject,
+    composition: &Stage2Composition,
+    resource_id: String,
+    version: String,
+) -> CommandResult<ResourcePrepareResult> {
+    let session = current_session(active, "resource.select")?;
     let resource_id = ats_kernel::ResourceId::parse(resource_id)
         .map_err(|_| CommandFailure::resource_invalid("resource.select"))?;
     let version = Sha256Digest::parse(version)
         .map_err(|_| CommandFailure::resource_invalid("resource.select"))?;
-    let contributions = resource_contributions(composition.inner(), "resource.select")?;
+    let contributions = resource_contributions(composition, "resource.select")?;
     ResourcePrepareService
         .select(
             session.resource_repository().as_ref(),
@@ -770,7 +901,11 @@ pub fn select_resource(
 
 #[tauri::command]
 pub fn get_run(active: State<'_, ActiveProject>, run_id: String) -> CommandResult<RunRecord> {
-    let session = current_session(&active, "run.get")?;
+    get_run_inner(&active, run_id)
+}
+
+pub(crate) fn get_run_inner(active: &ActiveProject, run_id: String) -> CommandResult<RunRecord> {
+    let session = current_session(active, "run.get")?;
     let id = RunId::parse(run_id).map_err(|_| CommandFailure::invalid_input("run.get"))?;
     session
         .repository()
@@ -780,7 +915,11 @@ pub fn get_run(active: State<'_, ActiveProject>, run_id: String) -> CommandResul
 
 #[tauri::command]
 pub fn list_runs(active: State<'_, ActiveProject>) -> CommandResult<Vec<RunSummary>> {
-    current_session(&active, "run.list")?
+    list_runs_inner(&active)
+}
+
+pub(crate) fn list_runs_inner(active: &ActiveProject) -> CommandResult<Vec<RunSummary>> {
+    current_session(active, "run.list")?
         .repository()
         .list()
         .map_err(|_| CommandFailure::storage("run.list"))
@@ -797,6 +936,12 @@ pub async fn cancel_run(active: State<'_, ActiveProject>, run_id: String) -> Com
 pub fn get_truth_status(
     composition: State<'_, Arc<Stage2Composition>>,
 ) -> CommandResult<TruthStatus> {
+    get_truth_status_inner(&composition)
+}
+
+pub(crate) fn get_truth_status_inner(
+    composition: &Stage2Composition,
+) -> CommandResult<TruthStatus> {
     let repository = FileTruthSnapshotRepository::new(composition.runtime_root().to_path_buf());
     let snapshot = repository
         .open_current(composition.pack())
@@ -811,8 +956,13 @@ pub fn get_truth_status(
 pub async fn import_truth(
     composition: State<'_, Arc<Stage2Composition>>,
 ) -> CommandResult<TruthStatus> {
-    let composition = Arc::clone(composition.inner());
-    tauri::async_runtime::spawn_blocking(move || {
+    import_truth_inner(Arc::clone(composition.inner())).await
+}
+
+pub(crate) async fn import_truth_inner(
+    composition: Arc<Stage2Composition>,
+) -> CommandResult<TruthStatus> {
+    tokio::task::spawn_blocking(move || {
         Sts2TruthImporter::import_current(
             composition.runtime_root(),
             composition.pack(),
@@ -834,7 +984,7 @@ pub async fn import_truth(
 }
 
 fn current_session(
-    active: &State<'_, ActiveProject>,
+    active: &ActiveProject,
     stage: &str,
 ) -> CommandResult<Arc<crate::project_session::ProjectSession>> {
     active

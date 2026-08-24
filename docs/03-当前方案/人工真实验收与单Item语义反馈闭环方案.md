@@ -6,7 +6,7 @@
 >
 > 权威入口：[`current plan`](./当前方案.md)、[`Typed Behavior IR`](./Typed-Behavior-IR与Game-Pack确定性生成架构方案.md) 和 Trellis 任务 `08-22-human-semantic-feedback-closure`。
 >
-> 最后更新：2026-08-22
+> 最后更新：2026-08-24
 
 ## 1. 决议摘要
 
@@ -378,6 +378,9 @@ Lacerate
 - UI 明确显示“机器通过，待人工真实验收”。
 - 用户只选择具体 Item 和输入行为偏差，不操作内部 Graph。
 - 提交后监控新 Graph/Run，不把源 Artifact 显示为已被覆盖。
+- installed candidate 通过 production binary `--headless-jsonl` 创建 fresh closure、轮询 Run/Graph
+  并提交 transient feedback；后台 transport 与 Tauri IPC 共享同一 Shell service。
+- 每条后台响应绑定 candidate BuildInfo；source/debug 测试不得冒充 installed closure。
 - 使用 synthetic Model 证明 target-only retry 和全闭包复验。
 - 使用 fresh candidate 交由用户验证一张已知偏差 Card 的修正前后行为。
 
@@ -391,6 +394,7 @@ Lacerate
 6. 收口 Composition Studio 的待验收状态和单 Item 反馈交互。
 7. 同步 stable specs、Prompt 总览、当前进度和 Trellis。
 8. 完成 focused tests 后再申请全量机器门禁与 replacement candidate 授权。
+9. 通过正式后台 Shell 完成 installed fresh closure，再交由用户操作真实游戏 UI。
 
 ## 14. 完成条件
 

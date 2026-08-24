@@ -28,8 +28,11 @@ artifacts/          ignored local build/release/verification evidence
 - `ats-runtime`, `ats-game-context`, and `ats-workspace` cannot depend on `ats-features`.
 - `ats-adapters` implements lower-layer ports and cannot import Feature workflows.
 - No target crate depends on deleted `ats-core`; exact edges are enforced by the DAG script.
-- `src-tauri` owns composition, active ProjectSession, app-data paths, configuration binding, IPC and exit drain. It delegates product work to `Stage2Composition`.
-- Web/CLI are Shells and cannot copy Run state machines, Feature rules, Prompt or game-specific content.
+- `src-tauri` owns composition, active ProjectSession, app-data paths, configuration binding, Tauri IPC,
+  production JSONL stdio transport and exit drain. Both Shell transports delegate to the same command
+  service functions and `Stage2Composition`.
+- Web/CLI/headless drivers are Shells and cannot copy Run state machines, Feature rules, Prompt or
+  game-specific content.
 - `game_packs/<id>/` owns game contributions and template/resources; generic code cannot branch on STS2.
 - `crates/ats-features/recipes/` owns pinned cross-game task language and output slots.
 - Mutable runtime/Truth/model data stays in configured app-data or ignored evidence roots, never source directories.

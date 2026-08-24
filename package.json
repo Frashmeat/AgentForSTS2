@@ -13,6 +13,7 @@
     "test:frontend": "node --test scripts/frontend/*.test.mjs",
     "test:e2e:gui": "node scripts/e2e/run-gui-e2e.mjs",
     "test:e2e:gui:wdio": "wdio run wdio.conf.mjs",
+    "test:e2e:headless:smoke": "node scripts/e2e/run-headless-smoke.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

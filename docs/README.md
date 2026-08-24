@@ -6,7 +6,7 @@
 >
 > 权威规则：协作与文档治理以仓库根目录 `PROJECT_SPEC.md` 为准。
 >
-> 最后更新：2026-08-22
+> 最后更新：2026-08-24
 
 ## 1. 阅读顺序
 
@@ -28,6 +28,7 @@
 | [`当前方案`](./03-当前方案/当前方案.md) | 当前阶段目标、范围、约束、顺序和完成条件 | 历史候选账本 |
 | [`Typed Behavior IR 与 Game Pack 确定性生成架构`](./03-当前方案/Typed-Behavior-IR与Game-Pack确定性生成架构方案.md) | 已实现的 AI 语义 IR、确定性 Game Adapter、诊断路由、请求预算和破坏性 cutover 合同 | 任务门禁流水 |
 | [`人工真实验收与单 Item 语义反馈闭环`](./03-当前方案/人工真实验收与单Item语义反馈闭环方案.md) | 机器成功与人工语义验收边界、单 Item 反馈、新 Graph 派生和不持久化原文 | 游戏专属 Capability 和人工验收结论 |
+| [`安装态后台验收执行入口`](./03-当前方案/安装态后台验收执行入口方案.md) | production binary 的无 UI JSONL Shell、共享服务、BuildInfo、锁和 candidate evidence 边界 | 真实游戏 UI 自动化和 Web Project API |
 | [`通用执行内核、Game Pipeline Provider 与 Game Pack 边界`](./03-当前方案/通用Mod流水线与Game-Pack边界.md) | 不同游戏如何复用可靠性内核并保留各自生成/构建链路 | 当前已经实现的 Provider 代码合同 |
 | [`Web 端与桌面端统一架构`](./03-当前方案/Web端与桌面端统一架构方案.md) | Web 与桌面共享工作台、API 合同、Application Service 和 Run/Graph 语义的目标架构 | 具体 Web API 实现、认证方案和任务门禁 |
 

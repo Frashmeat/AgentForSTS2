@@ -9,7 +9,7 @@
 AgentTheSpire 是编译期分层的模块化单体。桌面壳不拥有游戏规则、Prompt 或生成事务：
 
 ```text
-React / Tauri / Web / CLI
+React / Tauri IPC / desktop JSONL / Web / CLI
 -> Feature catalog + Stage2Composition
 -> typed Feature service
 -> Pack Contribution + Truth Evidence + selected Resources
@@ -27,7 +27,7 @@ crates/
   ats-adapters/      HTTP、文件仓储、dotnet、ZIP 等基础设施实现
   ats-web/           health、Feature catalog 和静态 SPA
   ats-cli/           deploy 工具与共享 Feature catalog
-src-tauri/           桌面 composition root、ProjectSession 和 IPC
+src-tauri/           桌面 composition root、ProjectSession、Tauri IPC 和 production JSONL Shell
 src/                 React/TypeScript 产品界面与 v3 transport guards
 game_packs/sts2/     STS2 contribution、资源规格和工程模板
 ```
@@ -51,7 +51,9 @@ game_packs/sts2/     STS2 contribution、资源规格和工程模板
 - `project.build`
 - `project.package`
 
-桌面端支持工程创建/打开/关闭、Truth 导入、Feature 提交、v3 Run 查询/取消和设置。Web 当前只暴露 health/catalog；CLI 可用 `cargo run -p ats-cli -- features` 输出相同 catalog。
+桌面端支持工程创建/打开/关闭、Truth 导入、Feature 提交、v3 Run 查询/取消和设置。安装版 binary
+还提供不启动 UI 的 `--headless-jsonl` 本地 stdio Shell，并与 Tauri IPC 共享同一套 ProjectSession
+和 Feature 执行。Web 当前只暴露 health/catalog；CLI 可用 `cargo run -p ats-cli -- features` 输出相同 catalog。
 
 `resource.prepare` 已统一支持用户文件、Pack 默认资源和 AI 媒体。AI Adapter 支持 OpenAI Images 与 Chat Completions 图片协议，生成 bytes 进入同一版本化 Resource Workspace；health 的 `mediaGenerationRegistered` 为 `true`。`ml-rembg` 是独立的候选构建/图片后处理身份，不等于媒体 provider 配置或连通性。
 
@@ -88,6 +90,17 @@ cargo run -p ats-web
 cargo run -p ats-cli -- features
 ```
 
+安装态后台 smoke 需要显式指定待验 binary 和隔离 AppData；它不会启动 WebView：
+
+```powershell
+$env:ATS_HEADLESS_APP_BINARY = 'C:\path\to\agentthespire-desktop.exe'
+$env:SPIREFORGE_APP_DATA_ROOT = 'C:\path\to\fresh-candidate-app-data'
+npm run test:e2e:headless:smoke
+```
+
+完整协议、BuildInfo、fresh evidence 和锁/隐私边界见
+[`安装态后台验收执行入口方案`](./docs/03-当前方案/安装态后台验收执行入口方案.md)。
+
 ## 质量门
 
 ```powershell
@@ -96,6 +109,7 @@ node scripts/check-stage2-dependency-dag.mjs
 cargo check --workspace --all-targets
 cargo test --workspace --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
+cargo test -p agentthespire-desktop --test headless_transport
 npm run test:frontend
 npx tsc -b --pretty false
 npm run build

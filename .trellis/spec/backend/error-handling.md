@@ -156,6 +156,17 @@ A valid adjustment replaces only target Behavior/Render checkpoints and revalida
 
 ## 6. Other Domain Failures
 
+### 6.1 Desktop Headless Transport
+
+Production desktop JSONL requests use the same `CommandFailure(ActionableFailure)` boundary as
+Tauri IPC. Envelope/version/request-id/size/unknown-field failures map to `run.input_invalid` at a
+closed `headless.request.*` stage. Serialization failure maps to a stable local Shell failure.
+
+The transport never returns serde/parser text, the rejected request, raw feedback, settings secrets,
+Provider bodies or worker diagnostics. A Feature submission returns a `RunId`; its eventual product
+failure remains authoritative in the persisted terminal `RunRecord` and is not rewritten as a
+transport failure.
+
 Resource Prepare keeps `resource.media_invalid`, `resource.unsupported`,
 `resource.source_invalid`, `resource.storage_failed`, `resource.pack_asset_missing` and
 `resource.pack_asset_invalid`. Pack default bytes must match the exact Pack asset hash.
